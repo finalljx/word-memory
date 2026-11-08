@@ -1855,3 +1855,41 @@ body.printing {
   letter-spacing: 0.04em;
   vertical-align: 1px;
 }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.sheet-story {
+  border: 1px solid #ddd;
+  border-left: 3px solid #999;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  break-inside: avoid;
+}
+
+.sheet-story-head {
+  font-size: 9pt;
+  letter-spacing: 0.12em;
+  color: #777;
+  margin-bottom: 3px;
+}
+
+.sheet-story p {
+  margin: 0;
+  font-size: 9pt;
+  line-height: 1.6;
+  color: #222;
+}
+
+.sheet-story .sheet-story-scene {
+  margin-top: 4px;
+  font-size: 8pt;
+  color: #777;
+}

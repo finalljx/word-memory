@@ -30,8 +30,11 @@ const S = {
   modalWordId: null,
   ai: { enabled: false, model: '' },
   wrongWords: [],
+  wrongPage: 1,
   overview: [],
 };
+
+const WRONG_PAGE_SIZE = 10;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -715,6 +718,8 @@ $('#decks').addEventListener('click', async (e) => {
   S.stats = state.stats;
   renderDecks();
   renderToday();
+  renderAdmin();
+  if (S.view === 'decks') renderDecksPage();
   renderStats();
   await startSession();
 });
@@ -1007,6 +1012,8 @@ async function openPrint(kind, deckId, backView) {
     }
     S.print = data;
     S.printBack = backView || S.view;
+    S.printStory = null;
+    $('#print-ai').classList.toggle('hidden', kind !== 'wrong');
     renderPrintSheet();
     $('#print-overlay').hidden = false;
     document.body.classList.add('printing');
@@ -1053,11 +1060,21 @@ function renderPrintSheet() {
     )
     .join('');
 
+  const storyBlock =
+    S.printStory && p.kind === 'wrong'
+      ? `<section class="sheet-story">
+          <div class="sheet-story-head">错题小故事</div>
+          <p>${esc(S.printStory.story)}</p>
+          ${S.printStory.scene ? `<p class="sheet-story-scene">画面：${esc(S.printStory.scene)}</p>` : ''}
+        </section>`
+      : '';
+
   $('#print-sheet').innerHTML = `
     <header class="sheet-head">
       <h1>${esc(title)}</h1>
       <span>${p.words.length} 个词 · ${date}</span>
     </header>
+    ${storyBlock}
     ${p.words.length ? `<div class="sheet-grid">${items}</div>` : '<div class="sheet-empty">没有内容</div>'}`;
 }
 
@@ -1190,22 +1207,43 @@ function renderAdmin() {
 
 function renderWrongList() {
   const list = wrongWords();
+  const totalPages = Math.max(1, Math.ceil(list.length / WRONG_PAGE_SIZE));
+  if (S.wrongPage > totalPages) S.wrongPage = totalPages;
+  if (S.wrongPage < 1) S.wrongPage = 1;
+
+  const start = (S.wrongPage - 1) * WRONG_PAGE_SIZE;
+  const pageItems = list.slice(start, start + WRONG_PAGE_SIZE);
+
   $('#wrong-count').textContent = `· ${list.length} 个`;
   $('#practice-wrong').disabled = list.length === 0;
   $('#clear-wrong').disabled = list.length === 0;
 
-  $('#wrong-list').innerHTML = list.length
-    ? list
-        .map(
-          (w) => `<div class="wrong-item">
-            <span class="w">${esc(w.word)}</span>
-            <span class="cn">${esc(w.cn || '待补齐')}${w.deckTitle ? `<span class="deck-tag">${esc(w.deckTitle)}</span>` : ''}</span>
-            <span class="badge-wrong">${w.progress.wrongCount ? `错 ${w.progress.wrongCount} 次` : '上次没记住'} · 第 ${w.progress.box} 箱</span>
-            <button class="mini" data-reset="${w.id}">重置</button>
-          </div>`
-        )
-        .join('')
-    : '<div class="empty">没有错词，继续保持。</div>';
+  if (!list.length) {
+    $('#wrong-list').innerHTML = '<div class="empty">没有错词，继续保持。</div>';
+    return;
+  }
+
+  const rows = pageItems
+    .map(
+      (w) => `<div class="wrong-item">
+        <span class="w">${esc(w.word)}</span>
+        <span class="cn">${esc(w.cn || '待补齐')}${w.deckTitle ? `<span class="deck-tag">${esc(w.deckTitle)}</span>` : ''}</span>
+        <span class="badge-wrong">${w.progress.wrongCount ? `错 ${w.progress.wrongCount} 次` : '上次没记住'} · 第 ${w.progress.box} 箱</span>
+        <button class="mini" data-reset="${w.id}">重置</button>
+      </div>`
+    )
+    .join('');
+
+  const pager =
+    totalPages > 1
+      ? `<div class="pager">
+          <button class="mini" data-page="prev" ${S.wrongPage <= 1 ? 'disabled' : ''}>上一页</button>
+          <span class="hint">第 ${S.wrongPage} / ${totalPages} 页 · 共 ${list.length} 个</span>
+          <button class="mini" data-page="next" ${S.wrongPage >= totalPages ? 'disabled' : ''}>下一页</button>
+        </div>`
+      : '';
+
+  $('#wrong-list').innerHTML = rows + pager;
 }
 
 function openWordModal(word) {
@@ -1410,6 +1448,12 @@ $('#admin-table').addEventListener('click', (e) => {
 });
 
 $('#wrong-list').addEventListener('click', (e) => {
+  const pager = e.target.closest('[data-page]');
+  if (pager) {
+    S.wrongPage += pager.dataset.page === 'next' ? 1 : -1;
+    renderWrongList();
+    return;
+  }
   const btn = e.target.closest('button[data-reset]');
   if (btn) resetOne(Number(btn.dataset.reset));
 });
@@ -1488,6 +1532,29 @@ $('#backup-file').addEventListener('change', async (e) => {
   }
 });
 $('#print-wrong').addEventListener('click', () => openPrint('wrong', null, 'admin'));
+$('#print-ai').addEventListener('click', async () => {
+  if (!S.print || S.print.kind !== 'wrong') return;
+  const btn = $('#print-ai');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  try {
+    const r = await api('/api/ai/story', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: '错题本',
+        words: S.print.words.map((w) => ({ word: w.word, cn: w.cn })),
+      }),
+    });
+    S.printStory = { story: r.story, scene: r.scene };
+    renderPrintSheet();
+    toast(r.missing?.length ? `已生成，但没用到：${r.missing.join('、')}` : '故事已生成');
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'AI 串联';
+  }
+});
 $('#print-close').addEventListener('click', closePrint);
 $('#print-go').addEventListener('click', () => window.print());
 ['opt-def', 'opt-hook', 'opt-example', 'opt-cn'].forEach((id) => {

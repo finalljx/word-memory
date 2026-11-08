@@ -95,6 +95,15 @@ async function serveStatic(res, pathname) {
   }
 }
 
+const reEscape = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function missingWordsInStory(story, words) {
+  const lower = String(story).toLowerCase();
+  return words
+    .filter((w) => !new RegExp(`(^|[^a-z])${reEscape(w.word.toLowerCase())}([^a-z]|$)`).test(lower))
+    .map((w) => w.word);
+}
+
 async function handleApi(req, res, url) {
   const db = getDb();
   const { pathname, searchParams } = url;
@@ -203,6 +212,25 @@ async function handleApi(req, res, url) {
       baseUrl: host,
       hint: cfg.enabled ? '' : '在 config.json 或环境变量 DEEPSEEK_API_KEY 中配置 key',
     });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/ai/story') {
+    const cfg = loadAiConfig(__dirname);
+    if (!cfg.enabled) return json(res, 400, { error: '还没有配置 API key' });
+    const body = await readBody(req);
+    const words = Array.isArray(body.words)
+      ? body.words
+          .map((w) => ({ word: String(w?.word || '').trim(), cn: String(w?.cn || '').trim() }))
+          .filter((w) => w.word)
+          .slice(0, 40)
+      : [];
+    if (words.length < 2) return json(res, 400, { error: '至少需要 2 个单词' });
+    try {
+      const { story, scene } = await generateStory(cfg, body.title || '错题本', words);
+      return json(res, 200, { story, scene, missing: missingWordsInStory(story, words) });
+    } catch (e) {
+      return json(res, 502, { error: e.message || '生成失败' });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/ai/fill') {
@@ -378,14 +406,7 @@ async function handleApi(req, res, url) {
     try {
       const { story, scene } = await generateStory(cfg, deck.title, words);
       saveDeckStory(db, id, story, scene);
-      const lower = story.toLowerCase();
-      const missing = words
-        .filter((w) => {
-          const re = new RegExp(`(^|[^a-z])${w.word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`);
-          return !re.test(lower);
-        })
-        .map((w) => w.word);
-      return json(res, 200, { story, scene, missing });
+      return json(res, 200, { story, scene, missing: missingWordsInStory(story, words) });
     } catch (e) {
       return json(res, 502, { error: e.message || '生成失败' });
     }
