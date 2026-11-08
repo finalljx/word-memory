@@ -68,6 +68,12 @@ async function init() {
     await loadWrong();
     await startSession();
     const initial = location.hash.replace('#', '');
+    if (initial.startsWith('print/')) {
+      const [, kind, id] = initial.split('/');
+      if (kind === 'wrong') openPrint('wrong', null, 'admin');
+      else if (kind === 'deck' && id) openPrint('deck', decodeURIComponent(id), 'decks');
+      return;
+    }
     if (['quiz', 'stats', 'admin', 'decks'].includes(initial)) switchView(initial);
   } catch (err) {
     console.error(err);
@@ -847,6 +853,7 @@ function deckCardHtml(d) {
       <div class="deck-ops">
         <button class="mini" data-open="${esc(d.id)}">学习</button>
         <button class="mini" data-manage="${esc(d.id)}">管理</button>
+        <button class="mini" data-print="${esc(d.id)}">打印</button>
         <button class="mini" data-rename="${esc(d.id)}">重命名</button>
         <button class="mini danger" data-del="${esc(d.id)}">删除</button>
       </div>
@@ -941,6 +948,81 @@ async function createDeckFlow() {
   renderDecks();
   await openDeck(r.id, 'admin');
   toast('词库已创建');
+}
+
+/* ---------------- 打印 ---------------- */
+
+async function openPrint(kind, deckId, backView) {
+  try {
+    let data;
+    if (kind === 'wrong') {
+      const r = await api('/api/wrong');
+      data = { kind: 'wrong', title: '错题本', words: r.items || [] };
+    } else {
+      const r = await api(`/api/decks/${encodeURIComponent(deckId)}/words`);
+      data = { kind: 'deck', title: r.deck.title, words: r.words || [] };
+    }
+    S.print = data;
+    S.printBack = backView || S.view;
+    renderPrintSheet();
+    $('#print-overlay').hidden = false;
+    document.body.classList.add('printing');
+    history.replaceState(null, '', kind === 'wrong' ? '#print/wrong' : `#print/deck/${deckId}`);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function renderPrintSheet() {
+  const p = S.print;
+  if (!p) return;
+  const opt = {
+    def: $('#opt-def').checked,
+    hook: $('#opt-hook').checked,
+    example: $('#opt-example').checked,
+    cn: $('#opt-cn').checked,
+  };
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const title = p.kind === 'wrong' ? '错题本' : p.title;
+
+  $('#print-title').textContent = p.kind === 'wrong' ? '打印预览 · 错题本' : `打印预览 · ${p.title}`;
+  $('#print-sub').textContent = `${p.words.length} 个词`;
+
+  const items = p.words
+    .map(
+      (w) => `<article class="sheet-item">
+        <div class="sheet-line">
+          <span class="sheet-word">${esc(w.word)}</span>
+          <span class="sheet-ipa">${esc(w.ipa || '')}</span>
+          ${opt.cn ? `<span class="sheet-cn">${esc(w.cn || '')}</span>` : ''}
+        </div>
+        ${opt.def && w.enDef ? `<div class="sheet-meta"><b>英</b>${esc(w.enDef)}</div>` : ''}
+        ${opt.hook && w.hook ? `<div class="sheet-meta"><b>钩</b>${esc(w.hook)}</div>` : ''}
+        ${opt.example && w.example ? `<div class="sheet-meta"><b>例</b>${esc(w.example)}</div>` : ''}
+        ${
+          p.kind === 'wrong'
+            ? `<div class="sheet-tag">错 ${w.progress?.wrongCount || 0} 次 · ${esc(w.deckTitle || '')}</div>`
+            : ''
+        }
+      </article>`
+    )
+    .join('');
+
+  $('#print-sheet').innerHTML = `
+    <header class="sheet-head">
+      <h1>${esc(title)}</h1>
+      <span>${p.words.length} 个词 · ${date}</span>
+    </header>
+    ${p.words.length ? `<div class="sheet-grid">${items}</div>` : '<div class="sheet-empty">没有内容</div>'}`;
+}
+
+function closePrint() {
+  $('#print-overlay').hidden = true;
+  document.body.classList.remove('printing');
+  S.print = null;
+  history.replaceState(null, '', '#' + (S.printBack || 'learn'));
 }
 
 /* ---------------- 管理 ---------------- */
@@ -1295,11 +1377,18 @@ $('#deck-list').addEventListener('click', (e) => {
   const d = btn.dataset;
   if (d.open) openDeck(d.open, 'learn');
   else if (d.manage) openDeck(d.manage, 'admin');
+  else if (d.print) openPrint('deck', d.print, 'decks');
   else if (d.rename) renameDeckFlow(d.rename);
   else if (d.del) deleteDeckFlow(d.del);
 });
 
 $('#decks-new').addEventListener('click', createDeckFlow);
+$('#print-wrong').addEventListener('click', () => openPrint('wrong', null, 'admin'));
+$('#print-close').addEventListener('click', closePrint);
+$('#print-go').addEventListener('click', () => window.print());
+['opt-def', 'opt-hook', 'opt-example', 'opt-cn'].forEach((id) => {
+  $('#' + id).addEventListener('change', renderPrintSheet);
+});
 
 $('#add-word').addEventListener('click', () => openWordModal(null));
 
@@ -1375,7 +1464,9 @@ $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') closeModal();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('#modal').hidden) closeModal();
+  if (e.key !== 'Escape') return;
+  if (!$('#print-overlay').hidden) closePrint();
+  else if (!$('#modal').hidden) closeModal();
 });
 
 init();

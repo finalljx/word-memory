@@ -115,6 +115,7 @@
           <div id="wrong-list"></div>
           <div class="row-actions" id="wrong-actions">
             <button class="btn primary small" id="practice-wrong">只练这些错词</button>
+            <button class="btn small" id="print-wrong">打印错题</button>
             <button class="btn small" id="clear-wrong">清除全部错误标记</button>
           </div>
         </div>
@@ -184,6 +185,28 @@
           <button class="btn small" id="modal-cancel">取消</button>
           <button class="btn primary small" id="modal-save">保存</button>
         </div>
+      </div>
+    </div>
+
+    <div class="print-overlay" id="print-overlay" hidden>
+      <div class="print-toolbar">
+        <div class="print-head">
+          <b id="print-title">打印预览</b>
+          <span class="hint" id="print-sub"></span>
+        </div>
+        <div class="print-opts">
+          <label><input type="checkbox" id="opt-def" checked /> 英文解释</label>
+          <label><input type="checkbox" id="opt-hook" checked /> 主钩</label>
+          <label><input type="checkbox" id="opt-example" checked /> 例句</label>
+          <label><input type="checkbox" id="opt-cn" checked /> 中文</label>
+        </div>
+        <div class="print-actions">
+          <button class="btn small" id="print-close">关闭</button>
+          <button class="btn primary small" id="print-go">打印</button>
+        </div>
+      </div>
+      <div class="print-scroll">
+        <div class="print-sheet" id="print-sheet"></div>
       </div>
     </div>
 

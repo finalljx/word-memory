@@ -309,6 +309,17 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: true, stats: getStats(db, deckId) });
   }
 
+  const deckWordsMatch = pathname.match(/^\/api\/decks\/([^/]+)\/words$/);
+  if (req.method === 'GET' && deckWordsMatch) {
+    const id = decodeURIComponent(deckWordsMatch[1]);
+    const deck = listDecks(db).find((d) => d.id === id);
+    if (!deck) return json(res, 404, { error: '词库不存在' });
+    return json(res, 200, {
+      deck: { id: deck.id, title: deck.title },
+      words: getWords(db, id),
+    });
+  }
+
   const deckMatch = pathname.match(/^\/api\/decks\/([^/]+)$/);
   if (deckMatch) {
     const deckIdParam = decodeURIComponent(deckMatch[1]);
