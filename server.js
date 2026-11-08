@@ -244,10 +244,11 @@ async function handleApi(req, res, url) {
       .split(',')
       .map(Number)
       .filter(Boolean);
+    const typeParam = searchParams.get('type');
     const quiz = makeQuiz(
       db,
       deckId,
-      searchParams.get('type') === 'spell' ? 'spell' : 'choice',
+      ['spell', 'cloze'].includes(typeParam) ? typeParam : 'choice',
       exclude,
       only
     );
@@ -257,12 +258,8 @@ async function handleApi(req, res, url) {
 
   if (req.method === 'POST' && pathname === '/api/quiz/answer') {
     const body = await readBody(req);
-    const result = answerQuiz(
-      db,
-      Number(body.wordId),
-      body.type === 'spell' ? 'spell' : 'choice',
-      body.answer
-    );
+    const answerType = ['spell', 'cloze'].includes(body.type) ? body.type : 'choice';
+    const result = answerQuiz(db, Number(body.wordId), answerType, body.answer);
     if (!result) return json(res, 404, { error: 'word not found' });
     return json(res, 200, { ...result, stats: getStats(db, deckId) });
   }

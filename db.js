@@ -379,7 +379,8 @@ export function applyReview(db, wordId, remembered, mode, elapsedMs = 0) {
   const row = db.prepare('SELECT * FROM progress WHERE word_id = ?').get(wordId);
   if (!row) return null;
   const now = new Date();
-  const box = remembered ? Math.min(row.box + 1, BOX_DAYS.length - 1) : 0;
+  const hard = (row.wrong_count || 0) >= 2;
+  const box = remembered ? Math.min(row.box + 1, hard ? 3 : BOX_DAYS.length - 1) : 0;
   const delay = remembered ? BOX_DAYS[box] * DAY : RETRY_MS;
   const due = new Date(now.getTime() + delay).toISOString();
 
@@ -747,6 +748,14 @@ function shuffle(a) {
   return a;
 }
 
+const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function pickOne(list, nowIso) {
+  const due = list.filter((w) => w.progress.dueAt <= nowIso);
+  const bag = due.length ? due : list;
+  return bag[Math.floor(Math.random() * bag.length)];
+}
+
 export function makeQuiz(db, deckId, type = 'choice', exclude = [], only = []) {
   const nowIso = new Date().toISOString();
   const all = db
@@ -757,15 +766,38 @@ export function makeQuiz(db, deckId, type = 'choice', exclude = [], only = []) {
   const ready = all.filter((w) => w.cn);
   const base = ready.length >= 2 ? ready : all;
   const scope = only.length ? base.filter((w) => only.includes(w.id)) : base;
-  const remaining = scope.filter((w) => !exclude.includes(w.id));
 
+  // 例句填空：只挑例句里真的包含该词的词
+  if (type === 'cloze') {
+    const eligible = scope.filter(
+      (w) => w.example && new RegExp(escapeRe(w.word), 'i').test(w.example)
+    );
+    const remaining = eligible.filter((w) => !exclude.includes(w.id));
+    if (!eligible.length) {
+      type = 'spell';
+    } else if (!remaining.length) {
+      return { done: true, total: eligible.length };
+    } else {
+      const pick = pickOne(remaining, nowIso);
+      const sentence = pick.example.replace(new RegExp(escapeRe(pick.word), 'i'), '_____');
+      return {
+        type: 'cloze',
+        wordId: pick.id,
+        sentence,
+        cn: pick.cn,
+        ipa: pick.ipa,
+        pos: pick.pos,
+        total: eligible.length,
+        remaining: remaining.length,
+      };
+    }
+  }
+
+  const remaining = scope.filter((w) => !exclude.includes(w.id));
   if (!remaining.length) {
     return { done: true, total: scope.length };
   }
-
-  const dueOnes = remaining.filter((w) => w.progress.dueAt <= nowIso);
-  const bag = dueOnes.length ? dueOnes : remaining;
-  const pick = bag[Math.floor(Math.random() * bag.length)];
+  const pick = pickOne(remaining, nowIso);
 
   if (type === 'spell') {
     return {

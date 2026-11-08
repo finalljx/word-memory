@@ -21,6 +21,7 @@ const S = {
   quizTotal: 0,
   quizOnly: [],
   quizDone: false,
+  spellHint: false,
   answered: false,
   mastery: false,
   round: 1,
@@ -171,7 +172,9 @@ function renderCard() {
     <div class="card" id="card">
       <div class="card-inner">
         <div class="face front">
-          ${w.pos ? `<div class="pos">${esc(w.pos)}</div>` : ''}
+          ${w.pos || w.progress.wrongCount >= 2 ? `<div class="pos">${esc(w.pos || '')}${
+            w.progress.wrongCount >= 2 ? ' <span class="hard-badge">难词</span>' : ''
+          }</div>` : ''}
           <h1 class="word">${esc(w.word)}</h1>
           <div class="ipa">${esc(w.ipa)}
             <button class="speak" data-say="${esc(w.word)}" title="听发音 (S)">🔊</button>
@@ -360,6 +363,7 @@ function relTime(iso) {
 
 async function loadQuiz() {
   S.answered = false;
+  S.spellHint = false;
   try {
     const params = new URLSearchParams({ deck: S.deckId, type: S.quizType });
     if (S.quizSeen.size) params.set('exclude', [...S.quizSeen].join(','));
@@ -432,16 +436,15 @@ function renderQuiz() {
   if (!q) return;
   const body = $('#quiz-body');
 
-  if (q.type === 'spell') {
+  if (q.type === 'cloze') {
     body.innerHTML = `
       <div class="q-card">
-        <div class="q-kicker">听音写词 · 也可以看中文写</div>
-        <h2 class="q-prompt">${esc(q.prompt)}</h2>
-        <p class="q-sub">${esc(q.ipa)} · ${esc(q.syllables || '')}</p>
+        <div class="q-kicker">例句填空 · 把单词填回去</div>
+        <h2 class="q-prompt cloze-sentence">${esc(q.sentence)}</h2>
+        <p class="q-sub">${esc(q.cn)}</p>
         <div class="spell-box">
           <input class="spell-input" id="spell-input" autocomplete="off" autocapitalize="off"
-                 spellcheck="false" placeholder="在这里写英文" />
-          <button class="btn small" id="play">🔊</button>
+                 spellcheck="false" placeholder="填这个空" />
         </div>
         <button class="btn primary" id="check" style="width:100%">检查</button>
         <div id="q-fb"></div>
@@ -449,11 +452,46 @@ function renderQuiz() {
       </div>`;
     const input = $('#spell-input');
     input.focus();
-    $('#play').addEventListener('click', () => speak(q.answer || ''));
     $('#check').addEventListener('click', submitSpell);
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') submitSpell();
     });
+    return;
+  }
+
+  if (q.type === 'spell') {
+    body.innerHTML = `
+      <div class="q-card">
+        <div class="q-kicker">听音写词 · 先听再写</div>
+        <div class="listen-row">
+          <button class="btn small" id="play-big">🔊 再听一遍</button>
+          <button class="link-btn" id="toggle-hint">${S.spellHint ? '隐藏提示' : '看提示'}</button>
+        </div>
+        <div class="spell-hint ${S.spellHint ? '' : 'hidden'}" id="spell-hint">
+          <span class="q-sub" style="margin:0">${esc(q.prompt)} · ${esc(q.ipa)}</span>
+        </div>
+        <div class="spell-box">
+          <input class="spell-input" id="spell-input" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" placeholder="听到什么就写什么" />
+        </div>
+        <button class="btn primary" id="check" style="width:100%">检查</button>
+        <div id="q-fb"></div>
+        <div class="next-row" id="q-next"></div>
+      </div>`;
+    const input = $('#spell-input');
+    input.focus();
+    const play = () => speak(q.answer || '');
+    $('#play-big').addEventListener('click', play);
+    $('#toggle-hint').addEventListener('click', () => {
+      S.spellHint = !S.spellHint;
+      $('#spell-hint').classList.toggle('hidden', !S.spellHint);
+      $('#toggle-hint').textContent = S.spellHint ? '隐藏提示' : '看提示';
+    });
+    $('#check').addEventListener('click', submitSpell);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitSpell();
+    });
+    setTimeout(play, 250);
     return;
   }
 
@@ -523,7 +561,7 @@ async function submitSpell() {
   try {
     const res = await api(`/api/quiz/answer?deck=${encodeURIComponent(S.deckId)}`, {
       method: 'POST',
-      body: JSON.stringify({ wordId: S.quiz.wordId, type: 'spell', answer: value }),
+      body: JSON.stringify({ wordId: S.quiz.wordId, type: S.quiz.type, answer: value }),
     });
     S.stats = res.stats;
     syncProgress(S.quiz.wordId, res.progress);
