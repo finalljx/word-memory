@@ -9,7 +9,25 @@
 - [AGENTS.md](AGENTS.md) — 给后续接手的人 / agent 看的项目说明：目录、数据模型、核心机制、接口、约定、已知坑
 - [docs/llm.md](docs/llm.md) — LLM 模块详解：配置、提示词、路由契约、错误码、无 key 测试、加新能力的步骤
 
-## 启动
+## 启动（macOS，推荐）
+
+**不用命令行，双击就行：**
+
+| 文件 | 作用 |
+|---|---|
+| `启动词卡.command` | 双击启动，自动开浏览器；关掉终端窗口即停止 |
+| `制作桌面图标.command` | 在桌面生成「词卡.app」，以后双击图标即可，**不弹终端** |
+| `停止词卡.command` | 停止后台运行的词卡 |
+
+第一次打开 `.command` 如果提示「无法打开，因为无法验证开发者」：右键文件 → 打开 → 再点「打开」即可。
+
+桌面图标同理，第一次右键 → 打开。
+
+> 桌面图标里记的是当前文件夹的绝对路径，**如果以后移动了 `word-memory` 文件夹，重新双击一次 `制作桌面图标.command`** 即可。后台运行日志在 `logs/server.log`。
+
+要求 Node ≥ 22.5（用到内置 `node:sqlite`，**无需 npm install**）。没装或版本太旧时，脚本会弹窗提示并给出下载地址。
+
+## 启动（命令行）
 
 ```bash
 cd word-memory
@@ -17,8 +35,6 @@ node server.js          # 或 npm start
 ```
 
 打开 <http://127.0.0.1:4610>。
-
-要求 Node ≥ 22.5（用到内置 `node:sqlite`，**无需 npm install**）。
 
 改端口：`PORT=5000 node server.js`。
 
@@ -198,6 +214,10 @@ word-memory/
 ├── config.example.json # AI 配置模板（复制成 config.json）
 ├── AGENTS.md          # 项目说明（给后续 agent）
 ├── docs/llm.md        # LLM 模块详解
+├── 启动词卡.command     # 双击启动
+├── 制作桌面图标.command  # 生成桌面 App
+├── 停止词卡.command     # 停止后台服务
+├── scripts/           # 启动/停止脚本
 ├── public/
 │   ├── index.html
 │   ├── style.css

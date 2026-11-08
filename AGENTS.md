@@ -14,6 +14,8 @@ node server.js          # 需要 Node ≥ 22.5（内置 node:sqlite）
 PORT=5000 node server.js
 ```
 
+macOS 普通用户走双击：`启动词卡.command`（前台）、`制作桌面图标.command`（生成桌面 App）、`停止词卡.command`。脚本会检查 Node 版本、端口占用，并自动开浏览器；`scripts/serve-bg.sh` 里做了 PATH 兜底，因为 AppleScript 启动时 PATH 很短。
+
 验证改动的基本顺序：
 
 1. `node --check server.js && node --check db.js && node --check llm.js && node --check public/app.js`
