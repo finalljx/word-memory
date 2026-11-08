@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4efe4" />
+    <title>词卡 · 五年级英语单词记忆</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">词</span>
+        <div class="brand-text">
+          <b>词卡</b>
+          <small>五年级英语 · 间隔复习</small>
+        </div>
+      </div>
+      <nav class="decks" id="decks" aria-label="词库"></nav>
+      <div class="today" id="today">今天还没开始</div>
+    </header>
+
+    <main class="stage">
+      <!-- 学习 -->
+      <section id="view-learn" class="view">
+        <div class="learn-top">
+          <div class="session">
+            <span class="session-label" id="session-label">今日复习</span>
+            <div class="bar"><i id="session-fill"></i></div>
+            <span class="session-count" id="session-count">0 / 0</span>
+          </div>
+          <div class="learn-tools">
+            <button class="chip" id="btn-mastery">全对闯关</button>
+            <button class="chip warn hidden" id="btn-wrong">只练错词</button>
+          </div>
+        </div>
+
+        <div class="card-wrap" id="card-wrap"></div>
+
+        <div class="actions" id="actions">
+          <button class="btn ghost" id="btn-forgot" disabled>
+            没记住 <kbd>←</kbd>
+          </button>
+          <button class="btn primary" id="btn-got" disabled>
+            记住了 <kbd>→</kbd>
+          </button>
+        </div>
+
+        <p class="fineprint">
+          先在心里回想，再翻面。翻面后再判断——凭「熟悉感」点「记住了」，是最常见的坑。
+        </p>
+      </section>
+
+      <!-- 自测 -->
+      <section id="view-quiz" class="view hidden">
+        <div class="quiz-head">
+          <div class="segmented" id="quiz-type">
+            <button data-type="choice" class="active">选择题</button>
+            <button data-type="spell">听写</button>
+          </div>
+          <div class="quiz-score" id="quiz-score">0 / 0</div>
+        </div>
+        <div class="quiz-body" id="quiz-body"></div>
+      </section>
+
+      <!-- 词库 -->
+      <section id="view-decks" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>词库 <span class="hint" id="decks-count"></span></h3>
+            <button class="mini" id="decks-new">＋ 新建词库</button>
+          </div>
+          <p class="panel-note">顶部只显示最近使用的 3 个，全部词库都在这里；每个词库下面列出它包含的单词。</p>
+          <div id="deck-list"></div>
+        </div>
+      </section>
+
+      <!-- 管理 -->
+      <section id="view-admin" class="view hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>AI 补齐 <span class="hint" id="ai-state">检查中…</span></h3>
+            <button class="mini" id="ai-test">测试连接</button>
+          </div>
+          <p class="panel-note" id="ai-hint">
+            用 DeepSeek 自动补全音标、英文解释、主钩、例句、提取题等缺失字段；已填的字段不会被覆盖。
+          </p>
+        </div>
+
+        <div class="panel">
+          <h3>快速录入</h3>
+          <p class="panel-note">
+            一行一个。只写英文也可以，AI 会补中文和其余字段；也可以写成 <code>单词 | 中文 | 英文解释</code>。
+          </p>
+          <textarea id="bulk" rows="5" spellcheck="false"
+            placeholder="fresh&#10;sweet&#10;spicy&#10;savoury"></textarea>
+          <div class="row-actions">
+            <button class="btn primary small" id="bulk-add">添加到当前词库</button>
+            <span class="hint" id="bulk-msg"></span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>单词列表 <span class="hint" id="word-count"></span></h3>
+            <button class="mini" id="add-word">＋ 新增单词</button>
+          </div>
+          <p class="panel-note">点「编辑」补全主钩、词块、例句；点「重置」把它的复习进度清零。</p>
+          <div class="table" id="admin-table"></div>
+        </div>
+
+        <div class="panel">
+          <h3>错词本 <span class="hint" id="wrong-count"></span></h3>
+          <p class="panel-note">所有词库共享。最近一次没记住、或累计错过的词，背对后自动移出。</p>
+          <div id="wrong-list"></div>
+          <div class="row-actions" id="wrong-actions">
+            <button class="btn primary small" id="practice-wrong">只练这些错词</button>
+            <button class="btn small" id="clear-wrong">清除全部错误标记</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>词库</h3>
+          <p class="panel-note">新建一个词库后，会自动切换过去。</p>
+          <div class="row-actions">
+            <input id="new-deck" class="input" placeholder="新词库名称，例如：五年级下册 Unit 1" />
+            <button class="btn small" id="create-deck">新建词库</button>
+          </div>
+          <div class="row-actions">
+            <button class="btn small" id="export-deck">导出当前词库 JSON</button>
+            <button class="btn small" id="import-deck">导入 JSON</button>
+            <input type="file" id="import-file" accept=".json,application/json" hidden />
+          </div>
+        </div>
+      </section>
+
+      <!-- 进度 -->
+      <section id="view-stats" class="view hidden">
+        <div class="stat-grid" id="stat-grid"></div>
+
+        <div class="panel">
+          <h3>记忆箱</h3>
+          <p class="panel-note">箱子越往后，复习间隔越长：0 天 → 1 → 2 → 4 → 7 → 15 天。</p>
+          <div class="boxes" id="boxes"></div>
+        </div>
+
+        <div class="panel">
+          <h3>词表</h3>
+          <div class="table" id="word-table"></div>
+        </div>
+
+        <div class="panel">
+          <h3>情节串联</h3>
+          <p class="story" id="story"></p>
+          <p class="scene" id="scene"></p>
+        </div>
+
+        <div class="panel panel-quiet">
+          <div>
+            <h3>重置</h3>
+            <p class="panel-note">清空本词库的复习记录，所有词回到第 0 箱。词本身不会删。</p>
+          </div>
+          <button class="btn small" id="reset">重置本词库</button>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" id="tabbar">
+      <button data-view="learn" class="active">学习</button>
+      <button data-view="quiz">自测</button>
+      <button data-view="stats">进度</button>
+      <button data-view="admin">管理</button>
+    </nav>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3 id="modal-title">编辑单词</h3>
+          <button class="icon-btn" id="modal-close" aria-label="关闭">✕</button>
+        </div>
+        <div class="form" id="word-form"></div>
+        <div class="row-actions end">
+          <button class="btn small hidden" id="modal-ai">AI 补齐</button>
+          <button class="btn small" id="modal-cancel">取消</button>
+          <button class="btn primary small" id="modal-save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

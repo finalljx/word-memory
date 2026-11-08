@@ -1,0 +1,14 @@
+{
+  "name": "word-memory",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "五年级英语单词记忆卡：翻转自测 + 间隔复习 + SQLite 记录",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
