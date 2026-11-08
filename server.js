@@ -1,4 +1,6 @@
 import http from 'node:http';
+import fsSync from 'node:fs';
+import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +27,8 @@ import {
   renameDeck,
   deleteDeck,
   getOverview,
+  isValidDbFile,
+  replaceDbFromFile,
 } from './db.js';
 import { loadAiConfig, enrichWord, testConnection } from './llm.js';
 
@@ -104,6 +108,58 @@ async function handleApi(req, res, url) {
       stats: getStats(db, deckId),
       now: new Date().toISOString(),
     });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/backup/export') {
+    const tmp = path.join(os.tmpdir(), `wm-export-${Date.now()}.db`);
+    try {
+      db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+      const stat = fsSync.statSync(tmp);
+      const name = `word-memory-${new Date().toISOString().slice(0, 10)}.db`;
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${name}"`,
+        'Content-Length': stat.size,
+        'Cache-Control': 'no-store',
+      });
+      const stream = fsSync.createReadStream(tmp);
+      stream.pipe(res);
+      stream.on('close', () => fsSync.unlink(tmp, () => {}));
+    } catch (e) {
+      fsSync.unlink(tmp, () => {});
+      return json(res, 500, { error: '导出失败：' + e.message });
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/backup/import') {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > 200 * 1024 * 1024) return json(res, 413, { error: '文件太大（上限 200MB）' });
+      chunks.push(chunk);
+    }
+    const buf = Buffer.concat(chunks);
+    if (!buf.length) return json(res, 400, { error: '没有收到文件' });
+
+    const tmp = path.join(os.tmpdir(), `wm-import-${Date.now()}.db`);
+    fsSync.writeFileSync(tmp, buf);
+    try {
+      if (!isValidDbFile(tmp)) {
+        return json(res, 400, { error: '这不是词卡导出的 .db 备份文件' });
+      }
+      replaceDbFromFile(tmp);
+      const decks = listDecks(getDb());
+      return json(res, 200, {
+        ok: true,
+        decks: decks.length,
+        words: decks.reduce((n, d) => n + d.total, 0),
+        deckList: decks,
+      });
+    } finally {
+      fsSync.unlink(tmp, () => {});
+    }
   }
 
   if (req.method === 'GET' && pathname === '/api/overview') {

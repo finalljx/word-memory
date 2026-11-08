@@ -121,6 +121,19 @@
         </div>
 
         <div class="panel">
+          <h3>备份与迁移</h3>
+          <p class="panel-note">
+            导出的是一个 SQLite 文件，包含所有词库、单词和复习进度。换电脑时在新机器上导入即可。不含 API key。
+          </p>
+          <div class="row-actions">
+            <button class="btn small" id="backup-export">导出数据（.db）</button>
+            <button class="btn small" id="backup-import">导入数据</button>
+            <input type="file" id="backup-file" accept=".db,.sqlite,.sqlite3,application/octet-stream" hidden />
+            <span class="hint" id="backup-msg"></span>
+          </div>
+        </div>
+
+        <div class="panel">
           <h3>词库</h3>
           <p class="panel-note">新建一个词库后，会自动切换过去。</p>
           <div class="row-actions">

@@ -43,6 +43,22 @@ node server.js          # 或 npm start
 
 `#decks` 页面列出所有词库，每个词库下面平铺它的单词（错词标红），并显示该词库的掌握 / 待复习 / 错词数量；可以直接学习、进入管理、重命名或删除（删除会连带删除单词和复习记录）。
 
+## 迁移到另一台电脑
+
+1. 新电脑装 **Node.js ≥ 22.5**（`node -v` 确认，需要内置 `node:sqlite`）
+2. 把整个 `word-memory/` 文件夹拷过去（`data/` 和 `config.json` 可以不带）
+3. 旧电脑：管理页 → **导出数据（.db）**，得到一个 `word-memory-日期.db`
+4. 新电脑：`node server.js`，打开管理页 → **导入数据**，选这个文件
+5. 配 key：复制 `config.example.json` 为 `config.json` 填 key，或设 `DEEPSEEK_API_KEY`
+6. 打开 <http://127.0.0.1:4610>
+
+说明：
+
+- 导出文件包含 `decks / words / progress / reviews` 全部数据，**不含 API key**
+- 导入会覆盖现有数据，覆盖前会自动备份成 `data/words.db.bak-时间戳`
+- 也可以直接拷贝 `data/words.db` 过去，效果和导入一样
+- 顶层词库选择存在浏览器 `localStorage`，换机器会回到第一个词库
+
 ## 打印
 
 词库页每个词库有「打印」，管理页错词本有「打印错题」。点开先看 A4 预览，再点右上角「打印」调起浏览器打印（可选另存为 PDF）。
@@ -158,6 +174,8 @@ SQLite 文件：`data/words.db`（首次启动自动建表并灌入种子词）�
 | POST | `/api/words/:id/reset` | 重置单个词的进度 |
 | POST | `/api/words/import` | `{deck, text}` 或 `{deck, words}` 批量导入 |
 | POST | `/api/decks` | `{title}` 新建词库 |
+| GET | `/api/backup/export` | 导出 .db 备份 |
+| POST | `/api/backup/import` | 上传 .db 覆盖导入 |
 | PATCH | `/api/decks/:id` | `{title}` 重命名 |
 | DELETE | `/api/decks/:id` | 删除词库（连带单词与记录） |
 

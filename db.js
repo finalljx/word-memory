@@ -68,6 +68,67 @@ CREATE INDEX IF NOT EXISTS idx_words_deck ON words(deck_id);
 
 let db = null;
 
+export function closeDb() {
+  if (!db) return;
+  try {
+    db.close();
+  } catch {}
+  db = null;
+}
+
+export function isValidDbFile(filePath) {
+  let probe = null;
+  try {
+    probe = new DatabaseSync(filePath);
+    const names = probe
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((r) => r.name);
+    return ['decks', 'words', 'progress'].every((t) => names.includes(t));
+  } catch {
+    return false;
+  } finally {
+    try {
+      probe?.close();
+    } catch {}
+  }
+}
+
+/**
+ * 用外部 .db 文件替换当前数据库。会先备份旧库，失败时自动回滚。
+ */
+export function replaceDbFromFile(srcPath) {
+  if (!isValidDbFile(srcPath)) throw new Error('这不是有效的词卡备份文件');
+
+  closeDb();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = `${DB_PATH}.bak-${stamp}`;
+  let hadOld = false;
+  try {
+    fs.copyFileSync(DB_PATH, backupPath);
+    hadOld = true;
+  } catch {}
+
+  for (const ext of ['-wal', '-shm']) {
+    try {
+      fs.unlinkSync(DB_PATH + ext);
+    } catch {}
+  }
+
+  fs.copyFileSync(srcPath, DB_PATH);
+
+  try {
+    return getDb();
+  } catch (e) {
+    if (hadOld) {
+      closeDb();
+      fs.copyFileSync(backupPath, DB_PATH);
+      getDb();
+    }
+    throw e;
+  }
+}
+
 export function getDb() {
   if (db) return db;
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });

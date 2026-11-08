@@ -1383,6 +1383,44 @@ $('#deck-list').addEventListener('click', (e) => {
 });
 
 $('#decks-new').addEventListener('click', createDeckFlow);
+
+$('#backup-export').addEventListener('click', () => {
+  $('#backup-msg').textContent = '正在导出…';
+  window.location.href = '/api/backup/export';
+  setTimeout(() => {
+    if ($('#backup-msg')) $('#backup-msg').textContent = '';
+  }, 4000);
+});
+
+$('#backup-import').addEventListener('click', () => $('#backup-file').click());
+
+$('#backup-file').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!confirm('导入会覆盖当前所有词库和复习进度，建议先导出备份。继续？')) return;
+  const btn = $('#backup-import');
+  btn.disabled = true;
+  $('#backup-msg').textContent = '正在导入…';
+  try {
+    const buf = await file.arrayBuffer();
+    const r = await fetch('/api/backup/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: buf,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || '导入失败');
+    $('#backup-msg').textContent = `已导入 ${data.decks} 个词库 / ${data.words} 个词`;
+    toast('导入成功，正在刷新…');
+    setTimeout(() => location.assign('/'), 900);
+  } catch (err) {
+    $('#backup-msg').textContent = '';
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
 $('#print-wrong').addEventListener('click', () => openPrint('wrong', null, 'admin'));
 $('#print-close').addEventListener('click', closePrint);
 $('#print-go').addEventListener('click', () => window.print());
