@@ -327,6 +327,10 @@ export function renameDeck(db, id, title) {
   db.prepare('UPDATE decks SET title = ? WHERE id = ?').run(t, id);
 }
 
+export function saveDeckStory(db, id, story, scene) {
+  db.prepare('UPDATE decks SET story = ?, scene = ? WHERE id = ?').run(story, scene, id);
+}
+
 export function deleteDeck(db, id) {
   db.prepare('DELETE FROM decks WHERE id = ?').run(id);
 }

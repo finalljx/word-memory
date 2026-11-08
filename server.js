@@ -29,8 +29,9 @@ import {
   getOverview,
   isValidDbFile,
   replaceDbFromFile,
+  saveDeckStory,
 } from './db.js';
-import { loadAiConfig, enrichWord, testConnection } from './llm.js';
+import { loadAiConfig, enrichWord, testConnection, generateStory } from './llm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -363,6 +364,34 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && resetMatch) {
     resetWord(db, Number(resetMatch[1]));
     return json(res, 200, { ok: true, stats: getStats(db, deckId) });
+  }
+
+  const storyMatch = pathname.match(/^\/api\/decks\/([^/]+)\/story$/);
+  if (req.method === 'POST' && storyMatch) {
+    const cfg = loadAiConfig(__dirname);
+    if (!cfg.enabled) {
+      return json(res, 400, { error: '还没有配置 DeepSeek key，无法生成故事' });
+    }
+    const id = decodeURIComponent(storyMatch[1]);
+    const deck = listDecks(db).find((d) => d.id === id);
+    if (!deck) return json(res, 404, { error: '词库不存在' });
+    const words = getWords(db, id);
+    if (words.length < 2) return json(res, 400, { error: '至少要有 2 个单词才能编故事' });
+
+    try {
+      const { story, scene } = await generateStory(cfg, deck.title, words);
+      saveDeckStory(db, id, story, scene);
+      const lower = story.toLowerCase();
+      const missing = words
+        .filter((w) => {
+          const re = new RegExp(`(^|[^a-z])${w.word.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`);
+          return !re.test(lower);
+        })
+        .map((w) => w.word);
+      return json(res, 200, { story, scene, missing });
+    } catch (e) {
+      return json(res, 502, { error: e.message || '生成失败' });
+    }
   }
 
   const deckWordsMatch = pathname.match(/^\/api\/decks\/([^/]+)\/words$/);

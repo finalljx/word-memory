@@ -167,3 +167,27 @@ export async function testConnection(cfg) {
     clearTimeout(timer);
   }
 }
+
+
+const STORY_SYSTEM = `你是一位儿童英语老师，负责把一组单词串成一个好记的小故事。
+
+规则：
+1. 用中文讲故事，把给定的英文单词原样嵌进中文句子里，不要加引号、不要翻译成中文。
+2. 每个单词至少出现一次，放在自然的位置，不要为了塞词而硬凑。
+3. 故事要具体、能拍成画面：有人物、有动作、有地点；不要写"很开心""很美好"这类空话。
+4. 长度 150–250 个汉字，5–10 句话。
+5. 另外给一句"画面描述"，说明可以怎么把故事画成一幅画（从左到右依次有什么）。
+6. 只输出一个 JSON 对象：{"story": "...", "scene": "..."}`;
+
+export async function generateStory(cfg, deckTitle, words) {
+  const list = words.map((w) => `${w.word}（${w.cn || ''}）`).join('、');
+  const content = await chat(cfg, [
+    { role: 'system', content: STORY_SYSTEM },
+    { role: 'user', content: `词库：${deckTitle}\n单词：${list}\n\n请生成故事。` },
+  ]);
+  const data = extractJson(content);
+  const story = clamp(data.story, 1200);
+  const scene = clamp(data.scene, 400);
+  if (!story) throw new Error('模型没有返回故事');
+  return { story, scene };
+}

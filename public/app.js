@@ -602,11 +602,16 @@ function renderStats() {
       .join('')}`;
 
   const deck = S.decks.find((d) => d.id === S.deckId);
-  $('#story').innerHTML = (deck?.story || '').replace(
-    /\b([a-zA-Z']+)\b/g,
-    (m) => `<b>${m}</b>`
-  );
+  const story = deck?.story || '';
+  $('#story').innerHTML = story
+    ? story.replace(/\b([a-zA-Z']+)\b/g, (m) => `<b>${m}</b>`)
+    : '<span class="hint">还没有故事，点右上角「AI 串联」生成一个。</span>';
   $('#scene').textContent = deck?.scene || '';
+  const aiBtn = $('#story-ai');
+  if (aiBtn) {
+    aiBtn.disabled = !S.ai.enabled;
+    aiBtn.title = S.ai.enabled ? '用当前词库的单词生成一个故事' : '先在管理页配置 DeepSeek key';
+  }
 }
 
 /* ---------------- 视图切换 ---------------- */
@@ -1383,6 +1388,29 @@ $('#deck-list').addEventListener('click', (e) => {
 });
 
 $('#decks-new').addEventListener('click', createDeckFlow);
+
+$('#story-ai').addEventListener('click', async () => {
+  const deck = S.decks.find((d) => d.id === S.deckId);
+  if (!deck) return;
+  if (!confirm(deck.story ? '重新生成会覆盖当前故事，继续？' : '用这个词库的单词串一个故事？')) return;
+  const btn = $('#story-ai');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  try {
+    const r = await api(`/api/decks/${encodeURIComponent(S.deckId)}/story`, { method: 'POST' });
+    deck.story = r.story;
+    deck.scene = r.scene;
+    renderStats();
+    toast(
+      r.missing?.length ? `已生成，但没用到：${r.missing.join('、')}` : '故事已生成'
+    );
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'AI 串联';
+  }
+});
 
 $('#backup-export').addEventListener('click', () => {
   $('#backup-msg').textContent = '正在导出…';
