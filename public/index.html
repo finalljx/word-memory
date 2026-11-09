@@ -59,8 +59,23 @@
             <button data-type="spell">听写</button>
             <button data-type="cloze">例句填空</button>
           </div>
+          <div class="segmented" id="quiz-scope">
+            <button data-scope="all" class="active">全部</button>
+            <button data-scope="wrong">只测错题</button>
+          </div>
           <div class="quiz-score" id="quiz-score">0 / 0</div>
         </div>
+        <div class="quiz-filter" id="quiz-filter" hidden>
+          <span class="hint">错题范围</span>
+          <select id="quiz-wrong-deck" class="select"></select>
+          <select id="quiz-wrong-date" class="select">
+            <option value="all">全部时间</option>
+            <option value="today">今天</option>
+            <option value="3d">近 3 天</option>
+            <option value="7d">近 7 天</option>
+          </select>
+        </div>
+
         <div class="quiz-body" id="quiz-body"></div>
       </section>
 
@@ -113,6 +128,15 @@
         <div class="panel">
           <h3>错词本 <span class="hint" id="wrong-count"></span></h3>
           <p class="panel-note">所有词库共享。最近一次没记住、或累计错过的词，背对后自动移出。</p>
+          <div class="filter-row">
+            <select id="wrong-deck" class="select"></select>
+            <select id="wrong-date" class="select">
+              <option value="all">全部时间</option>
+              <option value="today">今天</option>
+              <option value="3d">近 3 天</option>
+              <option value="7d">近 7 天</option>
+            </select>
+          </div>
           <div id="wrong-list"></div>
           <div class="row-actions" id="wrong-actions">
             <button class="btn primary small" id="practice-wrong">只练这些错词</button>

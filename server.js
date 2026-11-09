@@ -278,7 +278,10 @@ async function handleApi(req, res, url) {
       deckId,
       ['spell', 'cloze'].includes(typeParam) ? typeParam : 'choice',
       exclude,
-      only
+      only,
+      searchParams.get('scope') === 'wrong' ? 'wrong' : 'all',
+      searchParams.get('since') || '',
+      searchParams.get('wrongDeck') || ''
     );
     if (!quiz) return json(res, 404, { error: 'not enough words' });
     return json(res, 200, quiz);

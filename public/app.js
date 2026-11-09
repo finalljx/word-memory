@@ -15,6 +15,7 @@ const S = {
   view: 'learn',
   quiz: null,
   quizType: 'choice',
+  quizScope: 'all',
   quizScore: { right: 0, total: 0 },
   quizSeen: new Set(),
   quizWrong: new Set(),
@@ -31,6 +32,8 @@ const S = {
   ai: { enabled: false, model: '' },
   wrongWords: [],
   wrongPage: 1,
+  wrongFilterDeck: 'all',
+  wrongFilterDate: 'all',
   overview: [],
 };
 
@@ -116,6 +119,7 @@ function renderDecks() {
 
 function renderToday() {
   updateWrongChip();
+  updateQuizScopeLabels();
   const s = S.stats;
   if (!s || !s.todayReviews) {
     $('#today').textContent = '今天还没开始';
@@ -368,7 +372,12 @@ async function loadQuiz() {
   S.answered = false;
   S.spellHint = false;
   try {
-    const params = new URLSearchParams({ deck: S.deckId, type: S.quizType });
+    const params = new URLSearchParams({ deck: S.deckId, type: S.quizType, scope: S.quizScope });
+    if (S.quizScope === 'wrong') {
+      const since = wrongSince();
+      if (since) params.set('since', since);
+      if (S.wrongFilterDeck !== 'all') params.set('wrongDeck', S.wrongFilterDeck);
+    }
     if (S.quizSeen.size) params.set('exclude', [...S.quizSeen].join(','));
     if (S.quizOnly.length) params.set('only', S.quizOnly.join(','));
     const data = await api(`/api/quiz?${params.toString()}`);
@@ -410,6 +419,23 @@ function startQuizRound(only = []) {
 function renderQuizDone() {
   S.quizDone = true;
   const total = S.quizScore.total;
+  if (!total) {
+    $('#quiz-score').textContent = '0 / 0';
+    $('#quiz-body').innerHTML = `
+      <div class="done">
+        <h2>没有可测的错题</h2>
+        <p>${
+          S.wrongFilterDeck !== 'all' || S.wrongFilterDate !== 'all'
+            ? '当前筛选下没有错题，换个词库或时间试试。'
+            : '错词本是空的。先去学几个词，答错的会自动进来。'
+        }</p>
+        <div class="done-actions">
+          <button class="btn primary" id="quiz-empty-back">去学习</button>
+        </div>
+      </div>`;
+    $('#quiz-empty-back').addEventListener('click', () => switchView('learn'));
+    return;
+  }
   const right = S.quizScore.right;
   const wrong = S.quizWrong.size;
   const rate = total ? Math.round((right / total) * 100) : 0;
@@ -438,6 +464,11 @@ function renderQuiz() {
   const q = S.quiz;
   if (!q) return;
   const body = $('#quiz-body');
+  const filterBar = $('#quiz-filter');
+  if (filterBar) {
+    filterBar.hidden = S.quizScope !== 'wrong';
+    if (S.quizScope === 'wrong') renderWrongFilters();
+  }
 
   if (q.type === 'cloze') {
     body.innerHTML = `
@@ -466,6 +497,14 @@ function renderQuiz() {
     body.innerHTML = `
       <div class="q-card">
         <div class="q-kicker">听音写词 · 先听再写</div>
+        ${
+          q.enDef
+            ? `<div class="def-block spell-def">
+                 <span class="label">英文解释</span>
+                 <p>${esc(q.enDef)}</p>
+               </div>`
+            : ''
+        }
         <div class="listen-row">
           <button class="btn small" id="play-big">🔊 再听一遍</button>
           <button class="link-btn" id="toggle-hint">${S.spellHint ? '隐藏提示' : '看提示'}</button>
@@ -732,6 +771,30 @@ $('#tabbar').addEventListener('click', (e) => {
 $('#btn-forgot').addEventListener('click', () => review(false));
 $('#btn-got').addEventListener('click', () => review(true));
 
+$('#quiz-wrong-deck').addEventListener('change', (e) => {
+  S.wrongFilterDeck = e.target.value;
+  S.wrongPage = 1;
+  renderWrongFilters();
+  if (S.view === 'admin') renderWrongList();
+  startQuizRound();
+});
+
+$('#quiz-wrong-date').addEventListener('change', (e) => {
+  S.wrongFilterDate = e.target.value;
+  S.wrongPage = 1;
+  renderWrongFilters();
+  if (S.view === 'admin') renderWrongList();
+  startQuizRound();
+});
+
+$('#quiz-scope').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-scope]');
+  if (!btn || btn.dataset.scope === S.quizScope) return;
+  S.quizScope = btn.dataset.scope;
+  $$('#quiz-scope button').forEach((b) => b.classList.toggle('active', b === btn));
+  startQuizRound();
+});
+
 $('#quiz-type').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-type]');
   if (!btn) return;
@@ -798,6 +861,14 @@ async function loadWrong() {
     S.wrongWords = [];
   }
   updateWrongChip();
+  updateQuizScopeLabels();
+}
+
+function updateQuizScopeLabels() {
+  const allBtn = $('#quiz-scope [data-scope="all"]');
+  const wrongBtn = $('#quiz-scope [data-scope="wrong"]');
+  if (allBtn) allBtn.textContent = `全部 ${S.words.length}`;
+  if (wrongBtn) wrongBtn.textContent = `错题 ${filteredWrong().length}`;
 }
 
 function updateWrongChip() {
@@ -1000,12 +1071,12 @@ async function createDeckFlow() {
 
 /* ---------------- 打印 ---------------- */
 
-async function openPrint(kind, deckId, backView) {
+async function openPrint(kind, deckId, backView, presetWords) {
   try {
     let data;
     if (kind === 'wrong') {
-      const r = await api('/api/wrong');
-      data = { kind: 'wrong', title: '错题本', words: r.items || [] };
+      const words = Array.isArray(presetWords) ? presetWords : (await api('/api/wrong')).items || [];
+      data = { kind: 'wrong', title: '错题本', words };
     } else {
       const r = await api(`/api/decks/${encodeURIComponent(deckId)}/words`);
       data = { kind: 'deck', title: r.deck.title, words: r.words || [] };
@@ -1205,8 +1276,58 @@ function renderAdmin() {
   renderWrongList();
 }
 
+function filteredWrong() {
+  const now = Date.now();
+  return wrongWords().filter((w) => {
+    if (S.wrongFilterDeck !== 'all' && w.deckId !== S.wrongFilterDeck) return false;
+    const key = S.wrongFilterDate;
+    if (key === 'all') return true;
+    if (!w.lastWrongAt) return false;
+    const t = new Date(w.lastWrongAt).getTime();
+    if (key === 'today') return new Date(t).toDateString() === new Date().toDateString();
+    if (key === '3d') return now - t <= 3 * 86400000;
+    if (key === '7d') return now - t <= 7 * 86400000;
+    return true;
+  });
+}
+
+function wrongSince() {
+  const key = S.wrongFilterDate;
+  if (key === 'all') return '';
+  const now = new Date();
+  if (key === 'today') {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
+  if (key === '3d') return new Date(now.getTime() - 3 * 86400000).toISOString();
+  if (key === '7d') return new Date(now.getTime() - 7 * 86400000).toISOString();
+  return '';
+}
+
+function fillFilterSelect(deckSel, dateSel) {
+  if (deckSel) {
+    deckSel.innerHTML =
+      '<option value="all">全部词库</option>' +
+      S.decks.map((d) => `<option value="${esc(d.id)}">${esc(d.title)}</option>`).join('');
+    const valid =
+      S.wrongFilterDeck === 'all' || S.decks.some((d) => d.id === S.wrongFilterDeck);
+    deckSel.value = valid ? S.wrongFilterDeck : 'all';
+    if (!valid) S.wrongFilterDeck = 'all';
+  }
+  if (dateSel) dateSel.value = S.wrongFilterDate;
+}
+
+function renderWrongFilters() {
+  fillFilterSelect($('#wrong-deck'), $('#wrong-date'));
+  fillFilterSelect($('#quiz-wrong-deck'), $('#quiz-wrong-date'));
+  updateQuizScopeLabels();
+}
+
 function renderWrongList() {
-  const list = wrongWords();
+  renderWrongFilters();
+  const all = wrongWords();
+  const list = filteredWrong();
   const totalPages = Math.max(1, Math.ceil(list.length / WRONG_PAGE_SIZE));
   if (S.wrongPage > totalPages) S.wrongPage = totalPages;
   if (S.wrongPage < 1) S.wrongPage = 1;
@@ -1214,12 +1335,14 @@ function renderWrongList() {
   const start = (S.wrongPage - 1) * WRONG_PAGE_SIZE;
   const pageItems = list.slice(start, start + WRONG_PAGE_SIZE);
 
-  $('#wrong-count').textContent = `· ${list.length} 个`;
+  $('#wrong-count').textContent =
+    list.length === all.length ? `· ${all.length} 个` : `· ${list.length} / ${all.length} 个`;
   $('#practice-wrong').disabled = list.length === 0;
   $('#clear-wrong').disabled = list.length === 0;
 
   if (!list.length) {
-    $('#wrong-list').innerHTML = '<div class="empty">没有错词，继续保持。</div>';
+    const msg = all.length ? '当前筛选没有错词，换个条件试试。' : '没有错词，继续保持。';
+    $('#wrong-list').innerHTML = `<div class="empty">${msg}</div>`;
     return;
   }
 
@@ -1447,6 +1570,18 @@ $('#admin-table').addEventListener('click', (e) => {
   else if (btn.dataset.del) deleteWord(Number(btn.dataset.del));
 });
 
+$('#wrong-deck').addEventListener('change', (e) => {
+  S.wrongFilterDeck = e.target.value;
+  S.wrongPage = 1;
+  renderWrongList();
+});
+
+$('#wrong-date').addEventListener('change', (e) => {
+  S.wrongFilterDate = e.target.value;
+  S.wrongPage = 1;
+  renderWrongList();
+});
+
 $('#wrong-list').addEventListener('click', (e) => {
   const pager = e.target.closest('[data-page]');
   if (pager) {
@@ -1531,7 +1666,7 @@ $('#backup-file').addEventListener('change', async (e) => {
     btn.disabled = false;
   }
 });
-$('#print-wrong').addEventListener('click', () => openPrint('wrong', null, 'admin'));
+$('#print-wrong').addEventListener('click', () => openPrint('wrong', null, 'admin', filteredWrong()));
 $('#print-ai').addEventListener('click', async () => {
   if (!S.print || S.print.kind !== 'wrong') return;
   const btn = $('#print-ai');
@@ -1587,7 +1722,7 @@ $('#import-file').addEventListener('change', (e) => {
   if (file) importDeck(file);
   e.target.value = '';
 });
-$('#practice-wrong').addEventListener('click', () => startMastery(wrongWords()));
+$('#practice-wrong').addEventListener('click', () => startMastery(filteredWrong()));
 $('#clear-wrong').addEventListener('click', async () => {
   if (!confirm('清除所有词库的错误标记？复习进度不会变。')) return;
   await api('/api/wrong/clear', { method: 'POST', body: JSON.stringify({}) });

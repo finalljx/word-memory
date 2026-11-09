@@ -714,12 +714,19 @@ export function getWrongWords(db, deckId) {
   const filter = deckId ? 'AND w.deck_id = ?' : '';
   const rows = db
     .prepare(
-      `${CARD_SELECT} WHERE (p.wrong_count > 0 OR p.last_result = 0) ${filter}
+      `SELECT w.*, p.box, p.due_at, p.total, p.correct, p.wrong_count, p.last_result, p.last_reviewed_at,
+              (SELECT MAX(r.created_at) FROM reviews r WHERE r.word_id = w.id AND r.remembered = 0) AS last_wrong_at
+       FROM words w JOIN progress p ON p.word_id = w.id
+       WHERE (p.wrong_count > 0 OR p.last_result = 0) ${filter}
        ORDER BY p.wrong_count DESC, p.last_result ASC, w.sort`
     )
     .all(...(deckId ? [deckId] : []));
   const titles = Object.fromEntries(db.prepare('SELECT id, title FROM decks').all().map((d) => [d.id, d.title]));
-  return rows.map((r) => ({ ...toCard(r), deckTitle: titles[r.deck_id] || r.deck_id }));
+  return rows.map((r) => ({
+    ...toCard(r),
+    deckTitle: titles[r.deck_id] || r.deck_id,
+    lastWrongAt: r.last_wrong_at || null,
+  }));
 }
 
 export function resetWord(db, id) {
@@ -756,12 +763,28 @@ function pickOne(list, nowIso) {
   return bag[Math.floor(Math.random() * bag.length)];
 }
 
-export function makeQuiz(db, deckId, type = 'choice', exclude = [], only = []) {
+export function makeQuiz(
+  db,
+  deckId,
+  type = 'choice',
+  exclude = [],
+  only = [],
+  range = 'all',
+  since = '',
+  wrongDeck = ''
+) {
   const nowIso = new Date().toISOString();
-  const all = db
-    .prepare(`${CARD_SELECT} WHERE w.deck_id = ? ORDER BY w.sort`)
-    .all(deckId)
-    .map(toCard);
+  let all;
+  if (range === 'wrong') {
+    all = getWrongWords(db, null);
+    if (wrongDeck) all = all.filter((w) => w.deckId === wrongDeck);
+    if (since) all = all.filter((w) => w.lastWrongAt && w.lastWrongAt >= since);
+  } else {
+    all = db
+      .prepare(`${CARD_SELECT} WHERE w.deck_id = ? ORDER BY w.sort`)
+      .all(deckId)
+      .map(toCard);
+  }
 
   const ready = all.filter((w) => w.cn);
   const base = ready.length >= 2 ? ready : all;
@@ -805,6 +828,7 @@ export function makeQuiz(db, deckId, type = 'choice', exclude = [], only = []) {
       wordId: pick.id,
       prompt: pick.cn,
       ipa: pick.ipa,
+      enDef: pick.enDef,
       syllables: pick.syllables,
       pos: pick.pos,
       answer: pick.word,
