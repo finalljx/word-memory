@@ -21,6 +21,23 @@
     </header>
 
     <main class="stage">
+      <div class="mode-bar" id="mode-bar">
+        <div class="segmented" id="mode-switch">
+          <button data-mode="all" class="active">全部模式</button>
+          <button data-mode="wrong">错题模式</button>
+        </div>
+        <div class="mode-filter" id="mode-filter" hidden>
+          <select id="mode-deck" class="select"></select>
+          <select id="mode-date" class="select">
+            <option value="all">全部时间</option>
+            <option value="today">今天</option>
+            <option value="3d">近 3 天</option>
+            <option value="7d">近 7 天</option>
+          </select>
+          <span class="hint" id="mode-count"></span>
+        </div>
+      </div>
+
       <!-- 学习 -->
       <section id="view-learn" class="view">
         <div class="learn-top">
@@ -30,12 +47,19 @@
             <span class="session-count" id="session-count">0 / 0</span>
           </div>
           <div class="learn-tools">
-            <button class="chip" id="btn-mastery">全对闯关</button>
-            <button class="chip warn hidden" id="btn-wrong">只练错词</button>
+            <button class="chip" id="btn-prev-card" disabled>‹ 上一题</button>
+            <button class="chip" id="btn-mastery" title="把当前这一组词连续过，错的重来，直到一轮全对">全对闯关</button>
           </div>
         </div>
 
         <div class="card-wrap" id="card-wrap"></div>
+
+        <div class="peek-bar hidden" id="peek-bar">
+          <button class="btn small ghost" id="peek-prev">‹ 上一题</button>
+          <span class="hint" id="peek-info"></span>
+          <button class="btn small ghost" id="peek-next">下一题 ›</button>
+          <button class="btn primary small" id="peek-back">回到当前</button>
+        </div>
 
         <div class="actions" id="actions">
           <button class="btn ghost" id="btn-forgot" disabled>
@@ -45,10 +69,6 @@
             记住了 <kbd>→</kbd>
           </button>
         </div>
-
-        <p class="fineprint">
-          先在心里回想，再翻面。翻面后再判断——凭「熟悉感」点「记住了」，是最常见的坑。
-        </p>
       </section>
 
       <!-- 自测 -->
@@ -59,23 +79,9 @@
             <button data-type="spell">听写</button>
             <button data-type="cloze">例句填空</button>
           </div>
-          <div class="segmented" id="quiz-scope">
-            <button data-scope="all" class="active">全部</button>
-            <button data-scope="wrong">只测错题</button>
-          </div>
+          <button class="mini" id="quiz-prev" disabled>‹ 上一题</button>
           <div class="quiz-score" id="quiz-score">0 / 0</div>
         </div>
-        <div class="quiz-filter" id="quiz-filter" hidden>
-          <span class="hint">错题范围</span>
-          <select id="quiz-wrong-deck" class="select"></select>
-          <select id="quiz-wrong-date" class="select">
-            <option value="all">全部时间</option>
-            <option value="today">今天</option>
-            <option value="3d">近 3 天</option>
-            <option value="7d">近 7 天</option>
-          </select>
-        </div>
-
         <div class="quiz-body" id="quiz-body"></div>
       </section>
 
@@ -87,7 +93,11 @@
             <button class="mini" id="decks-new">＋ 新建词库</button>
           </div>
           <p class="panel-note">顶部只显示最近使用的 3 个，全部词库都在这里；每个词库下面列出它包含的单词。</p>
+          <div class="list-toolbar">
+            <input id="deck-search" class="input search" placeholder="搜词库名或单词…" />
+          </div>
           <div id="deck-list"></div>
+          <div id="deck-pager"></div>
         </div>
       </section>
 
@@ -122,7 +132,11 @@
             <button class="mini" id="add-word">＋ 新增单词</button>
           </div>
           <p class="panel-note">点「编辑」补全主钩、词块、例句；点「重置」把它的复习进度清零。</p>
+          <div class="list-toolbar">
+            <input id="word-search" class="input search" placeholder="搜单词或中文…" />
+          </div>
           <div class="table" id="admin-table"></div>
+          <div id="word-pager"></div>
         </div>
 
         <div class="panel">

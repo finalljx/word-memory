@@ -7,6 +7,8 @@ const S = {
   stats: null,
   queue: [],
   i: 0,
+  peek: null,
+  reviewLog: new Map(),
   revealed: false,
   shownAt: 0,
   done: 0,
@@ -15,10 +17,13 @@ const S = {
   view: 'learn',
   quiz: null,
   quizType: 'choice',
-  quizScope: 'all',
+  mode: localStorage.getItem('wm.mode') === 'wrong' ? 'wrong' : 'all',
   quizScore: { right: 0, total: 0 },
   quizSeen: new Set(),
   quizWrong: new Set(),
+  quizHistory: [],
+  quizPos: -1,
+  quizReview: false,
   quizTotal: 0,
   quizOnly: [],
   quizDone: false,
@@ -34,6 +39,10 @@ const S = {
   wrongPage: 1,
   wrongFilterDeck: 'all',
   wrongFilterDate: 'all',
+  wordQuery: '',
+  wordPage: 1,
+  deckQuery: '',
+  deckPage: 1,
   overview: [],
 };
 
@@ -73,6 +82,7 @@ async function init() {
     renderToday();
     await loadAiStatus();
     await loadWrong();
+    renderModeBar();
     await startSession();
     const initial = location.hash.replace('#', '');
     if (initial.startsWith('print/')) {
@@ -84,7 +94,10 @@ async function init() {
     if (['quiz', 'stats', 'admin', 'decks'].includes(initial)) switchView(initial);
   } catch (err) {
     console.error(err);
-    $('#card-wrap').innerHTML = `<div class="done"><h2>服务没连上</h2><p>请确认 server.js 正在运行。</p></div>`;
+    const network = err instanceof TypeError || /fetch|network|load failed/i.test(err.message || '');
+    $('#card-wrap').innerHTML = network
+      ? `<div class="done"><h2>服务没连上</h2><p>请确认 server.js 正在运行。</p></div>`
+      : `<div class="done"><h2>页面出错了</h2><p>${esc(err.message || err)}</p></div>`;
   }
 }
 
@@ -118,8 +131,7 @@ function renderDecks() {
 }
 
 function renderToday() {
-  updateWrongChip();
-  updateQuizScopeLabels();
+  updateModeBar();
   const s = S.stats;
   if (!s || !s.todayReviews) {
     $('#today').textContent = '今天还没开始';
@@ -135,13 +147,29 @@ async function startSession() {
   S.round = 1;
   S.roundWrong = [];
   S.roundsLog = [];
-  const q = await api(`/api/queue?deck=${encodeURIComponent(S.deckId)}&limit=60`);
-  S.queue = q.items;
-  S.stats = q.stats;
+  S.peek = null;
+  S.reviewLog = new Map();
   S.i = 0;
   S.done = 0;
   S.wrong = [];
   S.busy = false;
+
+  if (S.mode === 'wrong') {
+    await loadWrong();
+    S.queue = filteredWrong();
+    renderToday();
+    updateSessionBar(S.queue.length, 0);
+    if (!S.queue.length) {
+      renderIdle();
+      return;
+    }
+    renderCard();
+    return;
+  }
+
+  const q = await api(`/api/queue?deck=${encodeURIComponent(S.deckId)}&limit=60`);
+  S.queue = q.items;
+  S.stats = q.stats;
   renderToday();
   if (!S.queue.length) {
     renderIdle();
@@ -157,18 +185,22 @@ function updateSessionBar(total, done) {
   $('#session-fill').style.width = total ? `${(done / total) * 100}%` : '0%';
   $('#session-label').textContent = S.mastery
     ? `第 ${S.round} 轮闯关`
-    : total
-      ? '今日复习'
-      : '今日任务';
+    : S.mode === 'wrong'
+      ? '错题模式'
+      : total
+        ? '今日复习'
+        : '今日任务';
 }
 
-function renderCard() {
-  const w = S.queue[S.i];
+function renderCard(index = null) {
+  const peeking = Number.isInteger(index);
+  const idx = peeking ? index : S.i;
+  const w = S.queue[idx];
   if (!w) return;
-  S.revealed = false;
+  S.peek = peeking ? idx : null;
+  S.revealed = peeking;
   S.shownAt = Date.now();
-  $('#actions').style.display = 'flex';
-  $('.fineprint').style.display = '';
+  $('#actions').style.display = peeking ? 'none' : 'flex';
   $('#btn-forgot').disabled = true;
   $('#btn-got').disabled = true;
 
@@ -234,6 +266,27 @@ function renderCard() {
       speak(w.word);
     });
   });
+
+  if (peeking) card.classList.add('flipped');
+
+  const peekBar = $('#peek-bar');
+  if (peekBar) peekBar.classList.toggle('hidden', !peeking);
+  const prevChip = $('#btn-prev-card');
+  if (prevChip) prevChip.disabled = S.i === 0 && !peeking;
+
+  if (peeking) {
+    const remembered = S.reviewLog.get(w.id);
+    $('#peek-info').textContent = `第 ${idx + 1} / ${S.queue.length} 张 · ${
+      remembered === undefined ? '未评' : remembered ? '记住了' : '没记住'
+    }`;
+    $('#peek-prev').disabled = idx <= 0;
+    $('#peek-next').disabled = false;
+  }
+}
+
+function renderCurrent() {
+  if (S.i >= S.queue.length) renderDone();
+  else renderCard();
 }
 
 function flip() {
@@ -260,7 +313,7 @@ function syncProgress(wordId, p) {
 }
 
 async function review(remembered) {
-  if (!S.revealed || S.busy) return;
+  if (!S.revealed || S.busy || S.peek !== null) return;
   const w = S.queue[S.i];
   S.busy = true;
   $('#btn-forgot').disabled = true;
@@ -277,6 +330,8 @@ async function review(remembered) {
     });
     S.stats = res.stats;
     syncProgress(w.id, res.progress);
+    S.reviewLog.set(w.id, remembered);
+    S.peek = null;
     loadWrong();
     renderToday();
     S.done++;
@@ -300,7 +355,9 @@ async function review(remembered) {
 
 function renderDone() {
   $('#actions').style.display = 'none';
-  $('.fineprint').style.display = 'none';
+  $('#peek-bar')?.classList.add('hidden');
+  const prevChip = $('#btn-prev-card');
+  if (prevChip) prevChip.disabled = S.i === 0;
   const total = S.queue.length;
   const wrong = S.wrong.length;
   const right = total - wrong;
@@ -331,18 +388,29 @@ function renderDone() {
 
 function renderIdle() {
   const next = nextDue();
+  const wrongMode = S.mode === 'wrong';
   $('#actions').style.display = 'none';
-  $('.fineprint').style.display = 'none';
   $('#card-wrap').innerHTML = `
     <div class="done">
-      <h2>今天的词都过完了</h2>
-      <p>${next ? `下一次复习在 ${next}。` : '去自测里再练几轮吧。'}</p>
+      <h2>${wrongMode ? '没有符合条件的错词' : '今天的词都过完了'}</h2>
+      <p>${
+        wrongMode
+          ? '换个词库或时间试试，或者切回全部模式。'
+          : next
+            ? `下一次复习在 ${next}。`
+            : '去自测里再练几轮吧。'
+      }</p>
       <div class="done-actions">
-        <button class="btn primary" id="to-quiz">去自测</button>
+        ${
+          wrongMode
+            ? '<button class="btn primary" id="to-all">切到全部模式</button>'
+            : '<button class="btn primary" id="to-quiz">去自测</button>'
+        }
         <button class="btn ghost" id="to-stats">看进度</button>
       </div>
     </div>`;
-  $('#to-quiz').addEventListener('click', () => switchView('quiz'));
+  $('#to-all')?.addEventListener('click', () => setMode('all'));
+  $('#to-quiz')?.addEventListener('click', () => switchView('quiz'));
   $('#to-stats').addEventListener('click', () => switchView('stats'));
 }
 
@@ -372,8 +440,8 @@ async function loadQuiz() {
   S.answered = false;
   S.spellHint = false;
   try {
-    const params = new URLSearchParams({ deck: S.deckId, type: S.quizType, scope: S.quizScope });
-    if (S.quizScope === 'wrong') {
+    const params = new URLSearchParams({ deck: S.deckId, type: S.quizType, scope: S.mode });
+    if (S.mode === 'wrong') {
       const since = wrongSince();
       if (since) params.set('since', since);
       if (S.wrongFilterDeck !== 'all') params.set('wrongDeck', S.wrongFilterDeck);
@@ -389,6 +457,9 @@ async function loadQuiz() {
     S.quiz = data;
     S.quizTotal = data.total || S.quizTotal;
     S.quizSeen.add(data.wordId);
+    S.quizHistory.push({ quiz: data, answered: false, correct: null, result: null, userAnswer: '' });
+    S.quizPos = S.quizHistory.length - 1;
+    S.quizReview = false;
     S.quizDone = false;
     renderQuizScore();
     renderQuiz();
@@ -400,6 +471,9 @@ async function loadQuiz() {
 
 function resetQuizState() {
   S.quiz = null;
+  S.quizHistory = [];
+  S.quizPos = -1;
+  S.quizReview = false;
   S.quizSeen = new Set();
   S.quizWrong = new Set();
   S.quizScore = { right: 0, total: 0 };
@@ -418,6 +492,8 @@ function startQuizRound(only = []) {
 
 function renderQuizDone() {
   S.quizDone = true;
+  const prevBtn = $('#quiz-prev');
+  if (prevBtn) prevBtn.disabled = true;
   const total = S.quizScore.total;
   if (!total) {
     $('#quiz-score').textContent = '0 / 0';
@@ -463,12 +539,9 @@ function renderQuizDone() {
 function renderQuiz() {
   const q = S.quiz;
   if (!q) return;
+  S.quizReview = false;
+  updateQuizNav();
   const body = $('#quiz-body');
-  const filterBar = $('#quiz-filter');
-  if (filterBar) {
-    filterBar.hidden = S.quizScope !== 'wrong';
-    if (S.quizScope === 'wrong') renderWrongFilters();
-  }
 
   if (q.type === 'cloze') {
     body.innerHTML = `
@@ -507,6 +580,7 @@ function renderQuiz() {
         }
         <div class="listen-row">
           <button class="btn small" id="play-big">🔊 再听一遍</button>
+          <button class="link-btn" id="play-slow">🐢 慢速</button>
           <button class="link-btn" id="toggle-hint">${S.spellHint ? '隐藏提示' : '看提示'}</button>
         </div>
         <div class="spell-hint ${S.spellHint ? '' : 'hidden'}" id="spell-hint">
@@ -524,6 +598,7 @@ function renderQuiz() {
     input.focus();
     const play = () => speak(q.answer || '');
     $('#play-big').addEventListener('click', play);
+    $('#play-slow').addEventListener('click', () => speak(q.answer || '', 0.5));
     $('#toggle-hint').addEventListener('click', () => {
       S.spellHint = !S.spellHint;
       $('#spell-hint').classList.toggle('hidden', !S.spellHint);
@@ -573,10 +648,18 @@ async function submitChoice(key, btn) {
     });
     S.stats = res.stats;
     syncProgress(S.quiz.wordId, res.progress);
+    loadWrong();
     renderToday();
     S.quizScore.total++;
     if (res.correct) S.quizScore.right++;
     else S.quizWrong.add(S.quiz.wordId);
+    const entryC = S.quizHistory[S.quizPos];
+    if (entryC) {
+      entryC.answered = true;
+      entryC.correct = res.correct;
+      entryC.result = res;
+      entryC.userAnswer = S.quiz.options.find((o) => o.key === key)?.text || String(key);
+    }
     renderQuizScore();
 
     if (res.correct) btn.classList.add('right');
@@ -607,10 +690,18 @@ async function submitSpell() {
     });
     S.stats = res.stats;
     syncProgress(S.quiz.wordId, res.progress);
+    loadWrong();
     renderToday();
     S.quizScore.total++;
     if (res.correct) S.quizScore.right++;
     else S.quizWrong.add(S.quiz.wordId);
+    const entryS = S.quizHistory[S.quizPos];
+    if (entryS) {
+      entryS.answered = true;
+      entryS.correct = res.correct;
+      entryS.result = res;
+      entryS.userAnswer = value;
+    }
     renderQuizScore();
     input.disabled = true;
     input.style.borderColor = res.correct ? 'var(--accent)' : 'var(--warn)';
@@ -630,6 +721,53 @@ function showFeedback(res) {
   const next = $('#q-next');
   next.innerHTML = `<button class="btn primary" id="next" style="flex:0 0 auto;padding:11px 22px">下一题 <kbd>↵</kbd></button>`;
   $('#next').addEventListener('click', loadQuiz);
+}
+
+function updateQuizNav() {
+  const btn = $('#quiz-prev');
+  if (btn) btn.disabled = S.quizPos <= 0;
+}
+
+function quizGoTo(pos) {
+  if (pos < 0 || pos >= S.quizHistory.length) return;
+  S.quizPos = pos;
+  const entry = S.quizHistory[pos];
+  if (entry.answered) renderQuizReview(entry);
+  else {
+    S.quiz = entry.quiz;
+    S.quizReview = false;
+    renderQuiz();
+  }
+}
+
+function renderQuizReview(entry) {
+  const q = entry.quiz;
+  const r = entry.result || {};
+  const kind = q.type === 'choice' ? '选择题' : q.type === 'cloze' ? '例句填空' : '听写';
+  const prompt =
+    q.type === 'choice' ? q.prompt : q.type === 'cloze' ? q.sentence : q.prompt;
+  S.quizReview = true;
+  updateQuizNav();
+  $('#quiz-body').innerHTML = `
+    <div class="q-card">
+      <div class="q-kicker">回看第 ${S.quizPos + 1} 题 · ${kind}</div>
+      <h2 class="q-prompt" style="${q.type === 'cloze' ? 'font-size:clamp(20px,3vw,26px)' : ''}">${esc(prompt)}</h2>
+      ${q.type === 'choice' && q.ipa ? `<p class="q-sub">${esc(q.ipa)}</p>` : ''}
+      <div class="feedback ${entry.correct ? 'ok' : 'no'}">
+        ${entry.correct ? '✓ 答对了' : `✗ 正确答案是 <b>${esc(r.answer || '')}</b>`}
+        ${entry.userAnswer ? `<br>你的答案：${esc(entry.userAnswer)}` : ''}
+        ${r.cn ? `<br>${esc(r.cn)}` : ''}
+        ${r.example ? `<br>${esc(r.example)}` : ''}
+      </div>
+      <div class="next-row">
+        <button class="btn small ghost" id="rv-prev" ${S.quizPos <= 0 ? 'disabled' : ''}>‹ 上一题</button>
+        <button class="btn small ghost" id="rv-next" ${S.quizPos >= S.quizHistory.length - 1 ? 'disabled' : ''}>下一题 ›</button>
+        <button class="btn primary small" id="rv-last">回到最新</button>
+      </div>
+    </div>`;
+  $('#rv-prev').addEventListener('click', () => quizGoTo(S.quizPos - 1));
+  $('#rv-next').addEventListener('click', () => quizGoTo(S.quizPos + 1));
+  $('#rv-last').addEventListener('click', () => quizGoTo(S.quizHistory.length - 1));
 }
 
 function renderQuizScore() {
@@ -698,7 +836,13 @@ function renderStats() {
 
 function switchView(view) {
   S.view = view;
+  if (['learn', 'quiz', 'stats', 'admin', 'decks'].includes(view)) {
+    const target = `#${view}`;
+    if (location.hash !== target) history.replaceState(null, '', target);
+  }
   $$('.view').forEach((v) => v.classList.toggle('hidden', v.id !== `view-${view}`));
+  const modeBar = $('#mode-bar');
+  if (modeBar) modeBar.classList.toggle('hidden', view !== 'learn' && view !== 'quiz');
   $$('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   if (view === 'stats') {
     api(`/api/state?deck=${encodeURIComponent(S.deckId)}`)
@@ -712,20 +856,64 @@ function switchView(view) {
   }
   if (view === 'quiz' && !S.quiz && !S.quizDone) loadQuiz();
   if (view === 'admin') renderAdmin();
-  if (view === 'decks') renderDecksPage();
+  if (view === 'decks') loadDecksOverview();
 }
 
 /* ---------------- 工具 ---------------- */
 
-function speak(text) {
-  if (!text || !('speechSynthesis' in window)) {
+let preferredVoice = null;
+
+function refreshVoice() {
+  if (!('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices();
+  if (!voices.length) return;
+  const en = voices.filter((v) => /^en([-_]|$)/i.test(v.lang));
+  if (!en.length) return;
+
+  const wanted = [
+    'samantha',
+    'daniel',
+    'karen',
+    'moira',
+    'tessa',
+    'alex',
+    'google us english',
+    'google uk english female',
+    'microsoft aria',
+    'microsoft zira',
+  ];
+  for (const name of wanted) {
+    const hit = en.find((v) => v.name.toLowerCase().includes(name));
+    if (hit) {
+      preferredVoice = hit;
+      return;
+    }
+  }
+  preferredVoice =
+    en.find((v) => /en[-_]GB/i.test(v.lang) && v.localService) ||
+    en.find((v) => /en[-_]US/i.test(v.lang) && v.localService) ||
+    en.find((v) => v.localService) ||
+    en[0];
+}
+
+if ('speechSynthesis' in window) {
+  refreshVoice();
+  speechSynthesis.addEventListener?.('voiceschanged', refreshVoice);
+}
+
+function speak(text, rate = 0.78) {
+  if (!text) return;
+  if (!('speechSynthesis' in window)) {
     toast('这个浏览器不支持发音');
     return;
   }
+  if (!preferredVoice) refreshVoice();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'en-GB';
-  u.rate = 0.85;
+  if (preferredVoice) u.voice = preferredVoice;
+  u.lang = preferredVoice?.lang || 'en-GB';
+  u.rate = rate;
   u.pitch = 1;
+  u.volume = 1;
   speechSynthesis.cancel();
   speechSynthesis.speak(u);
 }
@@ -771,29 +959,39 @@ $('#tabbar').addEventListener('click', (e) => {
 $('#btn-forgot').addEventListener('click', () => review(false));
 $('#btn-got').addEventListener('click', () => review(true));
 
-$('#quiz-wrong-deck').addEventListener('change', (e) => {
+function setMode(mode) {
+  if (mode === S.mode) return;
+  S.mode = mode;
+  localStorage.setItem('wm.mode', mode);
+  renderModeBar();
+  if (S.view === 'quiz') startQuizRound();
+  else if (S.view === 'learn') startSession();
+}
+
+function onModeFilterChange() {
+  S.wrongPage = 1;
+  renderWrongFilters();
+  if (S.view === 'admin') renderWrongList();
+  if (S.view === 'learn') startSession();
+  else if (S.view === 'quiz') startQuizRound();
+}
+
+$('#mode-switch').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-mode]');
+  if (btn) setMode(btn.dataset.mode);
+});
+
+$('#mode-deck').addEventListener('change', (e) => {
   S.wrongFilterDeck = e.target.value;
-  S.wrongPage = 1;
-  renderWrongFilters();
-  if (S.view === 'admin') renderWrongList();
-  startQuizRound();
+  onModeFilterChange();
 });
 
-$('#quiz-wrong-date').addEventListener('change', (e) => {
+$('#mode-date').addEventListener('change', (e) => {
   S.wrongFilterDate = e.target.value;
-  S.wrongPage = 1;
-  renderWrongFilters();
-  if (S.view === 'admin') renderWrongList();
-  startQuizRound();
+  onModeFilterChange();
 });
 
-$('#quiz-scope').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-scope]');
-  if (!btn || btn.dataset.scope === S.quizScope) return;
-  S.quizScope = btn.dataset.scope;
-  $$('#quiz-scope button').forEach((b) => b.classList.toggle('active', b === btn));
-  startQuizRound();
-});
+$('#quiz-prev').addEventListener('click', () => quizGoTo(S.quizPos - 1));
 
 $('#quiz-type').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-type]');
@@ -835,6 +1033,9 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key.toLowerCase() === 's') {
       speak(S.queue[S.i]?.word);
     }
+  } else if (S.view === 'quiz' && S.quizReview) {
+    if (e.key === 'Enter') quizGoTo(S.quizPos + 1);
+    else if (e.key === 'ArrowLeft') quizGoTo(S.quizPos - 1);
   } else if (S.view === 'quiz' && S.quiz?.type === 'choice' && !S.answered) {
     const n = Number(e.key);
     if (n >= 1 && n <= 4) {
@@ -860,27 +1061,29 @@ async function loadWrong() {
   } catch {
     S.wrongWords = [];
   }
-  updateWrongChip();
-  updateQuizScopeLabels();
+  updateModeBar();
 }
 
-function updateQuizScopeLabels() {
-  const allBtn = $('#quiz-scope [data-scope="all"]');
-  const wrongBtn = $('#quiz-scope [data-scope="wrong"]');
-  if (allBtn) allBtn.textContent = `全部 ${S.words.length}`;
-  if (wrongBtn) wrongBtn.textContent = `错题 ${filteredWrong().length}`;
+function updateModeBar() {
+  const bar = $('#mode-bar');
+  if (!bar) return;
+  $$('#mode-switch button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.mode === S.mode)
+  );
+  const filter = $('#mode-filter');
+  if (filter) filter.hidden = S.mode !== 'wrong';
+  const count = $('#mode-count');
+  if (count) count.textContent = S.mode === 'wrong' ? `错词 ${filteredWrong().length} 个` : '';
 }
 
-function updateWrongChip() {
-  const n = wrongWords().length;
-  const btn = $('#btn-wrong');
-  if (!btn) return;
-  btn.classList.toggle('hidden', n === 0);
-  btn.textContent = `错词 ${n} 个 · 只练这些`;
+function renderModeBar() {
+  fillFilterSelect($('#mode-deck'), $('#mode-date'));
+  updateModeBar();
 }
 
 function startMastery(words) {
   if (!words.length) return toast('这一组没有词');
+  const restart = S.mastery;
   S.mastery = true;
   S.round = 1;
   S.roundsLog = [];
@@ -889,9 +1092,16 @@ function startMastery(words) {
   S.i = 0;
   S.done = 0;
   S.wrong = [];
+  S.peek = null;
+  S.reviewLog = new Map();
   switchView('learn');
   renderCard();
   updateSessionBar(S.queue.length, 0);
+  toast(
+    restart
+      ? `重新开始：${words.length} 个词，一路答对才算过`
+      : `开始闯关：${words.length} 个词，全部答对才算过`
+  );
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -906,7 +1116,6 @@ function endRound() {
 
 function renderRoundEnd(wrong) {
   $('#actions').style.display = 'none';
-  $('.fineprint').style.display = 'none';
   $('#card-wrap').innerHTML = `
     <div class="done">
       <h2>第 ${S.round} 轮 · 还差 ${wrong} 个</h2>
@@ -938,7 +1147,6 @@ function renderRoundEnd(wrong) {
 
 function renderVictory() {
   $('#actions').style.display = 'none';
-  $('.fineprint').style.display = 'none';
   $('#card-wrap').innerHTML = `
     <div class="done">
       <h2>全部背对了</h2>
@@ -958,9 +1166,8 @@ function renderVictory() {
 
 /* ---------------- 词库 ---------------- */
 
-function deckCardHtml(d) {
+function deckCardHtml(d, words = d.words || []) {
   const st = d.stats || {};
-  const words = d.words || [];
   return `<div class="deck-card ${d.id === S.deckId ? 'current' : ''}">
     <div class="deck-card-head">
       <div class="deck-title">
@@ -994,16 +1201,58 @@ function deckCardHtml(d) {
   </div>`;
 }
 
-async function renderDecksPage() {
+async function loadDecksOverview() {
   try {
     const { decks } = await api('/api/overview');
     S.overview = decks;
-    $('#decks-count').textContent = `· ${decks.length} 个`;
-    $('#deck-list').innerHTML = decks.length
-      ? decks.map(deckCardHtml).join('')
-      : '<div class="empty">还没有词库，点右上角新建一个。</div>';
   } catch (e) {
     toast(e.message);
+  }
+  renderDecksPage();
+}
+
+function renderDecksPage() {
+  const decks = S.overview || [];
+  const q = (S.deckQuery || '').trim().toLowerCase();
+  const matchWord = (w) =>
+    (w.word || '').toLowerCase().includes(q) || (w.cn || '').toLowerCase().includes(q);
+
+  const items = [];
+  for (const d of decks) {
+    const titleHit = (d.title || '').toLowerCase().includes(q);
+    let words = d.words || [];
+    if (q && !titleHit) words = words.filter(matchWord);
+    if (!q || titleHit || words.length) items.push({ deck: d, words });
+  }
+
+  const per = 3;
+  const totalPages = Math.max(1, Math.ceil(items.length / per));
+  S.deckPage = Math.min(Math.max(1, S.deckPage), totalPages);
+  const start = (S.deckPage - 1) * per;
+  const pageItems = items.slice(start, start + per);
+
+  const search = $('#deck-search');
+  if (search && search.value !== S.deckQuery) search.value = S.deckQuery;
+
+  $('#decks-count').textContent =
+    items.length === decks.length
+      ? `· ${decks.length} 个`
+      : `· ${items.length} / ${decks.length} 个`;
+
+  $('#deck-list').innerHTML = pageItems.length
+    ? pageItems.map((x) => deckCardHtml(x.deck, x.words)).join('')
+    : `<div class="empty">${q ? '没有匹配的词库或单词' : '还没有词库，点右上角新建一个。'}</div>`;
+
+  const pager = $('#deck-pager');
+  if (pager) {
+    pager.innerHTML =
+      totalPages > 1
+        ? `<div class="pager">
+             <button class="mini" data-deck-page="prev" ${S.deckPage <= 1 ? 'disabled' : ''}>上一页</button>
+             <span class="hint">第 ${S.deckPage} / ${totalPages} 页 · 共 ${items.length} 个</span>
+             <button class="mini" data-deck-page="next" ${S.deckPage >= totalPages ? 'disabled' : ''}>下一页</button>
+           </div>`
+        : '';
   }
 }
 
@@ -1031,7 +1280,7 @@ async function renameDeckFlow(id) {
   });
   S.decks = r.decks;
   renderDecks();
-  renderDecksPage();
+  loadDecksOverview();
   toast('已改名');
 }
 
@@ -1055,7 +1304,7 @@ async function deleteDeckFlow(id) {
     }
   }
   renderDecks();
-  renderDecksPage();
+  loadDecksOverview();
   toast('已删除');
 }
 
@@ -1249,9 +1498,29 @@ async function reloadState() {
 }
 
 function renderAdmin() {
-  updateWrongChip();
-  $('#word-count').textContent = `· ${S.words.length} 个`;
-  const rows = S.words
+  updateModeBar();
+  const q = (S.wordQuery || '').trim().toLowerCase();
+  const all = S.words;
+  const list = q
+    ? all.filter(
+        (w) =>
+          (w.word || '').toLowerCase().includes(q) || (w.cn || '').toLowerCase().includes(q)
+      )
+    : all;
+
+  const per = 10;
+  const totalPages = Math.max(1, Math.ceil(list.length / per));
+  S.wordPage = Math.min(Math.max(1, S.wordPage), totalPages);
+  const start = (S.wordPage - 1) * per;
+  const pageItems = list.slice(start, start + per);
+
+  const search = $('#word-search');
+  if (search && search.value !== S.wordQuery) search.value = S.wordQuery;
+
+  $('#word-count').textContent =
+    list.length === all.length ? `· ${all.length} 个` : `· ${list.length} / ${all.length} 个`;
+
+  const rows = pageItems
     .map(
       (w) => `<div class="atrow">
         <span class="w">${esc(w.word)}</span>
@@ -1269,9 +1538,23 @@ function renderAdmin() {
       </div>`
     )
     .join('');
+
   $('#admin-table').innerHTML =
     `<div class="atrow head"><span>单词</span><span>中文</span><span>错</span><span>箱</span><span style="text-align:right">操作</span></div>` +
-    (rows || '<div class="empty">这个词库还没有词，用上面的快速录入加几个。</div>');
+    (rows ||
+      `<div class="empty">${q ? '没有匹配的单词' : '这个词库还没有词，用上面的快速录入加几个。'}</div>`);
+
+  const pager = $('#word-pager');
+  if (pager) {
+    pager.innerHTML =
+      totalPages > 1
+        ? `<div class="pager">
+             <button class="mini" data-word-page="prev" ${S.wordPage <= 1 ? 'disabled' : ''}>上一页</button>
+             <span class="hint">第 ${S.wordPage} / ${totalPages} 页 · 共 ${list.length} 个</span>
+             <button class="mini" data-word-page="next" ${S.wordPage >= totalPages ? 'disabled' : ''}>下一页</button>
+           </div>`
+        : '';
+  }
 
   renderWrongList();
 }
@@ -1310,8 +1593,7 @@ function fillFilterSelect(deckSel, dateSel) {
     deckSel.innerHTML =
       '<option value="all">全部词库</option>' +
       S.decks.map((d) => `<option value="${esc(d.id)}">${esc(d.title)}</option>`).join('');
-    const valid =
-      S.wrongFilterDeck === 'all' || S.decks.some((d) => d.id === S.wrongFilterDeck);
+    const valid = S.wrongFilterDeck === 'all' || S.decks.some((d) => d.id === S.wrongFilterDeck);
     deckSel.value = valid ? S.wrongFilterDeck : 'all';
     if (!valid) S.wrongFilterDeck = 'all';
   }
@@ -1320,8 +1602,8 @@ function fillFilterSelect(deckSel, dateSel) {
 
 function renderWrongFilters() {
   fillFilterSelect($('#wrong-deck'), $('#wrong-date'));
-  fillFilterSelect($('#quiz-wrong-deck'), $('#quiz-wrong-date'));
-  updateQuizScopeLabels();
+  fillFilterSelect($('#mode-deck'), $('#mode-date'));
+  updateModeBar();
 }
 
 function renderWrongList() {
@@ -1550,8 +1832,33 @@ async function importDeck(file) {
 
 /* ---------------- 管理事件 ---------------- */
 
-$('#btn-mastery').addEventListener('click', () => startMastery(S.words));
-$('#btn-wrong').addEventListener('click', () => startMastery(wrongWords()));
+$('#btn-prev-card').addEventListener('click', () => {
+  if (S.i <= 0) return;
+  renderCard(S.i - 1);
+});
+
+$('#peek-prev').addEventListener('click', () => {
+  if (S.peek === null || S.peek <= 0) return;
+  renderCard(S.peek - 1);
+});
+
+$('#peek-next').addEventListener('click', () => {
+  if (S.peek === null) return;
+  if (S.peek < S.i - 1) renderCard(S.peek + 1);
+  else {
+    S.peek = null;
+    renderCurrent();
+  }
+});
+
+$('#peek-back').addEventListener('click', () => {
+  S.peek = null;
+  renderCurrent();
+});
+
+$('#btn-mastery').addEventListener('click', () =>
+  startMastery(S.mode === 'wrong' ? filteredWrong() : S.words)
+);
 
 $('#admin-table').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
@@ -1591,6 +1898,32 @@ $('#wrong-list').addEventListener('click', (e) => {
   }
   const btn = e.target.closest('button[data-reset]');
   if (btn) resetOne(Number(btn.dataset.reset));
+});
+
+$('#word-search').addEventListener('input', (e) => {
+  S.wordQuery = e.target.value;
+  S.wordPage = 1;
+  renderAdmin();
+});
+
+$('#word-pager').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-word-page]');
+  if (!btn) return;
+  S.wordPage += btn.dataset.wordPage === 'next' ? 1 : -1;
+  renderAdmin();
+});
+
+$('#deck-search').addEventListener('input', (e) => {
+  S.deckQuery = e.target.value;
+  S.deckPage = 1;
+  renderDecksPage();
+});
+
+$('#deck-pager').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-deck-page]');
+  if (!btn) return;
+  S.deckPage += btn.dataset.deckPage === 'next' ? 1 : -1;
+  renderDecksPage();
 });
 
 $('#deck-list').addEventListener('click', (e) => {
@@ -1773,6 +2106,14 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#print-overlay').hidden) closePrint();
   else if (!$('#modal').hidden) closeModal();
+});
+
+window.addEventListener('hashchange', () => {
+  if (!$('#print-overlay').hidden) return;
+  const h = location.hash.replace('#', '');
+  if (['learn', 'quiz', 'stats', 'admin', 'decks'].includes(h) && h !== S.view) {
+    switchView(h);
+  }
 });
 
 init();

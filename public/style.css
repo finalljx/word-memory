@@ -1071,8 +1071,8 @@ kbd {
   }
 
   .card {
-    height: min(60vh, 470px);
-    min-height: 400px;
+    height: min(58vh, 440px);
+    min-height: 380px;
   }
 
   .fineprint {
@@ -1935,4 +1935,36 @@ body.printing {
 
 .quiz-filter[hidden] {
   display: none;
+}
+
+/* ---------- 全局模式栏 ---------- */
+
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 920px;
+  margin: 0 auto 12px;
+}
+
+.mode-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-filter[hidden] {
+  display: none;
+}
+
+.peek-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: 920px;
+  margin: 14px auto 0;
 }

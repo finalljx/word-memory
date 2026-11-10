@@ -54,6 +54,7 @@ data/words.db 运行时数据库（.gitignore）
 - **全对闯关**：一轮错词进下一轮，直到某轮零错
 - **自测**：`choice / spell / cloze` 三种题型，一轮内用 `exclude` 去重，全部过完给成绩单
 - **学习队列**：`GET /api/queue` 按 `box asc, due_at asc` 取到期词
+- **模式**：全局 `S.mode = all | wrong`，学习与自测共用；`wrong` 时学习队列是筛选后的错词，自测传 `scope=wrong` + `since` / `wrongDeck`
 
 ## LLM
 
@@ -73,9 +74,13 @@ data/words.db 运行时数据库（.gitignore）
 |---|---|
 | `deckId / decks / words / stats` | 当前词库与数据 |
 | `queue / i / revealed / wrong` | 学习队列与进度 |
+| `peek / reviewLog` | 学习页回看：正在看的旧卡下标、每张卡的评分记录 |
 | `mastery / round / roundWrong` | 闯关 |
+| `mode` | 全局模式：`all` / `wrong`（学习、自测共用） |
 | `quiz / quizType / quizSeen / quizWrong / quizScore` | 自测一轮的状态 |
+| `quizHistory / quizPos / quizReview` | 自测回看：题目历史、当前下标、是否在回看 |
 | `ai / wrongWords / overview` | AI 状态、全局错词、词库总览 |
+| `wordQuery / wordPage`、`deckQuery / deckPage` | 管理页单词搜索/分页、词库页搜索/分页 |
 | `print / printBack` | 打印预览 |
 
 主要渲染函数：`renderCard`（学习卡）、`renderQuiz`、`renderStats`、`renderAdmin`、`renderDecksPage`、`renderPrintSheet`。
