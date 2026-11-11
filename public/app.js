@@ -217,6 +217,7 @@ function renderCard(index = null) {
           <h1 class="word">${esc(w.word)}</h1>
           <div class="ipa">${esc(w.ipa)}
             <button class="speak" data-say="${esc(w.word)}" title="听发音 (S)">🔊</button>
+            <button class="speak speak-slow" data-say="${esc(w.word)}" data-slow="1" title="慢速再听一遍">🐢</button>
           </div>
           <div class="front-def">
             <span class="label">英文解释</span>
@@ -263,9 +264,11 @@ function renderCard(index = null) {
   card.querySelectorAll('.speak').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      speak(w.word);
+      speak(w.word, btn.dataset.slow ? 0.62 : 1);
     });
   });
+  preloadAudio(w.word);
+  preloadAudio(S.queue[S.i + 1]?.word);
 
   if (peeking) card.classList.add('flipped');
 
@@ -597,8 +600,9 @@ function renderQuiz() {
     const input = $('#spell-input');
     input.focus();
     const play = () => speak(q.answer || '');
+    preloadAudio(q.answer || '');
     $('#play-big').addEventListener('click', play);
-    $('#play-slow').addEventListener('click', () => speak(q.answer || '', 0.5));
+    $('#play-slow').addEventListener('click', () => speak(q.answer || '', 0.62));
     $('#toggle-hint').addEventListener('click', () => {
       S.spellHint = !S.spellHint;
       $('#spell-hint').classList.toggle('hidden', !S.spellHint);
@@ -861,6 +865,93 @@ function switchView(view) {
 
 /* ---------------- 工具 ---------------- */
 
+/* ---------------- 发音 ---------------- */
+
+// 默认英音；想要美音，控制台执行 localStorage.setItem('wm.accent','us') 后刷新
+const ACCENT = localStorage.getItem('wm.accent') === 'us' ? 'us' : 'uk';
+const ACCENT_LANG = ACCENT === 'us' ? 'en-US' : 'en-GB';
+
+const audioCache = new Map(); // 单词 -> 预加载好的 <audio>
+const AUDIO_CACHE_MAX = 30;
+let curAudio = null;
+
+function audioUrl(word) {
+  return `/api/audio?w=${encodeURIComponent(word)}&accent=${ACCENT}`;
+}
+
+// 缓存只留最近的 30 条，免得翻几百张卡时越攒越多
+function trimAudioCache() {
+  for (const key of [...audioCache.keys()]) {
+    if (audioCache.size <= AUDIO_CACHE_MAX) break;
+    const el = audioCache.get(key);
+    if (el === curAudio) continue;
+    audioCache.delete(key);
+    try {
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    } catch {}
+  }
+}
+
+// 提前把录音拉进内存，点的时候几乎零延迟
+function preloadAudio(word) {
+  const w = String(word || '').trim();
+  if (!w || typeof Audio === 'undefined' || audioCache.has(w)) return;
+  const el = new Audio(audioUrl(w));
+  el.preload = 'auto';
+  audioCache.set(w, el);
+  el.load();
+  trimAudioCache();
+}
+
+// 录音是真人朗读，按原速播；慢速靠降速不变调
+function playRecorded(word, rate) {
+  return new Promise((resolve, reject) => {
+    const w = String(word || '').trim();
+    if (!w || typeof Audio === 'undefined') return reject(new Error('no audio support'));
+    let el = audioCache.get(w);
+    if (!el) {
+      el = new Audio(audioUrl(w));
+      el.preload = 'auto';
+      audioCache.set(w, el);
+      trimAudioCache();
+    }
+    if (curAudio && curAudio !== el) {
+      try {
+        curAudio.pause();
+      } catch {}
+    }
+    curAudio = el;
+    el.preservesPitch = true;
+    el.webkitPreservesPitch = true;
+    el.playbackRate = rate;
+    el.volume = 1;
+
+    const timer = setTimeout(() => reject(new Error('timeout')), 5000);
+    el.onerror = () => {
+      clearTimeout(timer);
+      audioCache.delete(w);
+      reject(new Error('audio unavailable'));
+    };
+    if (el.readyState >= 2 && el.currentTime > 0) {
+      try {
+        el.currentTime = 0;
+      } catch {}
+    }
+    el.play().then(
+      () => {
+        clearTimeout(timer);
+        resolve(true);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 let preferredVoice = null;
 
 function refreshVoice() {
@@ -870,17 +961,22 @@ function refreshVoice() {
   const en = voices.filter((v) => /^en([-_]|$)/i.test(v.lang));
   if (!en.length) return;
 
+  // 优先挑「读得清楚」的那几款：在线神经语音 > 系统增强音 > 普通音
   const wanted = [
+    'google us english',
+    'google uk english female',
+    'microsoft aria online',
+    'microsoft jenny online',
+    'microsoft zira',
+    'ava',
+    'allison',
     'samantha',
+    'serena',
     'daniel',
     'karen',
     'moira',
     'tessa',
     'alex',
-    'google us english',
-    'google uk english female',
-    'microsoft aria',
-    'microsoft zira',
   ];
   for (const name of wanted) {
     const hit = en.find((v) => v.name.toLowerCase().includes(name));
@@ -889,7 +985,9 @@ function refreshVoice() {
       return;
     }
   }
+  const lang = ACCENT_LANG.toLowerCase();
   preferredVoice =
+    en.find((v) => v.lang.toLowerCase().replace('_', '-') === lang && v.localService) ||
     en.find((v) => /en[-_]GB/i.test(v.lang) && v.localService) ||
     en.find((v) => /en[-_]US/i.test(v.lang) && v.localService) ||
     en.find((v) => v.localService) ||
@@ -901,21 +999,28 @@ if ('speechSynthesis' in window) {
   speechSynthesis.addEventListener?.('voiceschanged', refreshVoice);
 }
 
-function speak(text, rate = 0.78) {
-  if (!text) return;
+// 录音拿不到（断网 / 服务没起来）时的兜底：系统朗读
+function speakFallback(text, rate) {
   if (!('speechSynthesis' in window)) {
-    toast('这个浏览器不支持发音');
+    toast('这个浏览器发不出声音');
     return;
   }
   if (!preferredVoice) refreshVoice();
   const u = new SpeechSynthesisUtterance(text);
   if (preferredVoice) u.voice = preferredVoice;
-  u.lang = preferredVoice?.lang || 'en-GB';
-  u.rate = rate;
+  u.lang = preferredVoice?.lang || ACCENT_LANG;
+  u.rate = rate < 1 ? 0.6 : 0.9;
   u.pitch = 1;
   u.volume = 1;
   speechSynthesis.cancel();
-  speechSynthesis.speak(u);
+  // Chrome 在 cancel 之后立刻 speak 会吞掉开头，隔一拍再播
+  setTimeout(() => speechSynthesis.speak(u), 60);
+}
+
+function speak(text, rate = 1) {
+  const word = String(text || '').trim();
+  if (!word) return;
+  playRecorded(word, rate).catch(() => speakFallback(word, rate));
 }
 
 let toastTimer = null;

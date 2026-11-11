@@ -307,6 +307,11 @@ kbd {
   border-color: var(--accent-soft);
 }
 
+.speak-slow {
+  font-size: 13px;
+  border-style: dashed;
+}
+
 .front-def {
   margin-top: 12px;
   padding: 10px 20px;

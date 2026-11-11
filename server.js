@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fsSync from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +28,7 @@ import {
   renameDeck,
   deleteDeck,
   getOverview,
+  DB_PATH,
   isValidDbFile,
   replaceDbFromFile,
   saveDeckStory,
@@ -56,6 +58,79 @@ function json(res, code, data) {
     'Cache-Control': 'no-store',
   });
   res.end(body);
+}
+
+/* ---------------- 发音 ---------------- */
+// 浏览器自带的语音合成质量参差，前台默认用词典的真人录音；
+// 录音拉一次就落到 data/audio/，之后完全离线、点开即响。
+const AUDIO_DIR = process.env.AUDIO_DIR || path.join(path.dirname(DB_PATH), 'audio');
+const AUDIO_ACCENT_TYPE = { uk: 1, us: 2 }; // 有道词典：1 英音、2 美音
+const AUDIO_SOURCES = [
+  (word, type) => `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=${type}`,
+];
+
+async function fetchAudio(word, accent) {
+  const type = AUDIO_ACCENT_TYPE[accent] || AUDIO_ACCENT_TYPE.uk;
+  let lastErr = null;
+  for (const build of AUDIO_SOURCES) {
+    try {
+      const resp = await fetch(build(word, type), {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36',
+          Referer: 'https://dict.youdao.com/',
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!resp.ok) throw new Error(`上游 ${resp.status}`);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      // 失败时上游会回一段很小的 html，按大小挡掉
+      if (buf.length < 1500) throw new Error('音频内容异常');
+      return buf;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('没有可用的发音源');
+}
+
+async function handleAudio(res, searchParams) {
+  const word = String(searchParams.get('w') || '').trim().slice(0, 60);
+  if (!/^[A-Za-z][A-Za-z' .\-]{0,59}$/.test(word)) {
+    return json(res, 400, { error: '单词不合法' });
+  }
+  const accent = searchParams.get('accent') === 'us' ? 'us' : 'uk';
+  const key = crypto
+    .createHash('sha1')
+    .update(`${accent}:${word.toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 20);
+  const file = path.join(AUDIO_DIR, `${key}.mp3`);
+
+  let buf = null;
+  try {
+    buf = fsSync.readFileSync(file);
+  } catch {
+    buf = null;
+  }
+  if (!buf || buf.length < 1500) {
+    try {
+      buf = await fetchAudio(word, accent);
+      fsSync.mkdirSync(AUDIO_DIR, { recursive: true });
+      fsSync.writeFileSync(`${file}.tmp`, buf);
+      fsSync.renameSync(`${file}.tmp`, file);
+    } catch (e) {
+      console.warn(`[audio] ${word} (${accent}): ${e.message}`);
+      return json(res, 502, { error: '发音拉取失败' });
+    }
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'audio/mpeg',
+    'Content-Length': buf.length,
+    'Cache-Control': 'public, max-age=2592000',
+  });
+  res.end(buf);
 }
 
 function readBody(req) {
@@ -108,6 +183,10 @@ async function handleApi(req, res, url) {
   const db = getDb();
   const { pathname, searchParams } = url;
   const deckId = searchParams.get('deck') || 'taste';
+
+  if (req.method === 'GET' && pathname === '/api/audio') {
+    return handleAudio(res, searchParams);
+  }
 
   if (req.method === 'GET' && pathname === '/api/state') {
     touchDeck(db, deckId);

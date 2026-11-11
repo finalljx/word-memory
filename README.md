@@ -89,6 +89,16 @@ node server.js          # 或 npm start
 - 也可以直接拷贝 `data/words.db` 过去，效果和导入一样
 - 顶层词库选择存在浏览器 `localStorage`，换机器会回到第一个词库
 
+## 发音
+
+点卡片上的 🔊（或按 `S`）就出声。发音走词典的**真人录音**，不再用浏览器自带的语音合成，清楚得多。
+
+- 第一次点需要联网拉一段音频，之后存在 `data/audio/`，断网也能放、再点几乎零延迟
+- 学习卡会预加载当前词和下一个词，翻卡后点立刻响
+- 自测「听写」页有 🐢 慢速：按 0.62 倍速放，音调不变，适合跟读
+- 默认英音。想要美音，浏览器控制台执行一次 `localStorage.setItem('wm.accent','us')`，刷新即可
+- 拉不到录音（断网、服务没起来）时自动退回系统朗读，不会没声音
+
 ## 打印
 
 词库页每个词库有「打印」，管理页错词本有「打印错题」。点开先看 A4 预览，再点右上角「打印」调起浏览器打印（可选另存为 PDF）。
@@ -199,6 +209,7 @@ SQLite 文件：`data/words.db`（首次启动自动建表并灌入种子词）�
 | GET | `/api/stats?deck=taste` | 统计 |
 | POST | `/api/reset` | `{deck}` 或 `{}` 全部重置 |
 | GET | `/api/overview` | 所有词库 + 各自单词 + 统计 |
+| GET | `/api/audio?w=word&accent=uk\|us` | 单词发音（mp3，磁盘缓存） |
 | GET | `/api/wrong` | 错词列表（不带 deck 即全部词库） |
 | POST | `/api/wrong/clear` | `{deck}` 清除错误标记 |
 | POST | `/api/words` | 新增单词 |

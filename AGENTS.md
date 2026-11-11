@@ -56,6 +56,14 @@ data/words.db 运行时数据库（.gitignore）
 - **学习队列**：`GET /api/queue` 按 `box asc, due_at asc` 取到期词
 - **模式**：全局 `S.mode = all | wrong`，学习与自测共用；`wrong` 时学习队列是筛选后的错词，自测传 `scope=wrong` + `since` / `wrongDeck`
 
+## 发音
+
+- 前端 `speak(text, rate)` 先播 `/api/audio` 的**词典真人录音**（清晰），失败才退回系统 `speechSynthesis`
+- 服务端把录音缓存在 `data/audio/<sha1>.mp3`，第二次起零网络；`AUDIO_DIR` 可覆盖缓存目录
+- 默认英音（`uk`，有道 `type=1`）；`localStorage['wm.accent']='us'` 切美音，只是前端请求参数
+- 慢速靠 `playbackRate = 0.62` + `preservesPitch`（不变调），不要用降低采样或缩短时长的手段
+- 学习卡渲染时预加载当前词与下一个词；前端 `audioCache` 上限 30 条
+
 ## LLM
 
 - 配置在 `config.json` 或环境变量，**每次请求重新读取**（改完刷新页面即可）
@@ -99,6 +107,7 @@ POST /api/words/:id/enrich  POST /api/words/:id/reset
 POST /api/words/import      POST /api/wrong/clear
 POST /api/decks   PATCH/DELETE /api/decks/:id   GET /api/decks/:id/words
 POST /api/decks/:id/story   GET  /api/backup/export   POST /api/backup/import
+GET  /api/audio?w=&accent=uk|us
 ```
 
 ## 约定
